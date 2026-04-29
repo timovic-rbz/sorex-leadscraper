@@ -21,7 +21,7 @@ export default function Sidebar() {
     <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center gap-2 border-r border-stone-200 bg-white py-6 lg:w-60 lg:items-stretch lg:px-4">
       <Link href="/" className="mb-6 flex items-center gap-2 lg:px-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-900 text-lg font-semibold text-white">S</div>
-        <span className="hidden text-base font-semibold lg:inline">Sorex Leadscraper</span>
+        <span className="hidden text-base font-semibold lg:inline">Soreax Leadscraper</span>
       </Link>
 
       <nav className="flex flex-1 flex-col gap-1">
