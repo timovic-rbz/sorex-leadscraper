@@ -1,0 +1,29 @@
+# Env / Secrets (defense in depth – web/.gitignore deckt es auch ab)
+.env
+.env.local
+.env.*.local
+web/.env.local
+
+# Claude Code per-Maschine Settings (allowlist etc.)
+.claude/settings.local.json
+
+# Python (Streamlit-Version)
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.db
+.env
+
+# Node / Next.js (defense in depth)
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+
+# OS / Editors
+.DS_Store
+.vscode/
+.idea/
+*.swp

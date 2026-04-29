@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f4f2ee;
+  --card: #ffffff;
+  --ink: #0f1115;
+  --muted: #8a8a8a;
+  --line: #ececec;
+  --accent: #e11d48; /* rose-600 */
+  --accent-soft: #ffe4e9;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Sanfte Custom-Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-white border border-stone-200/70 shadow-[0_1px_2px_rgba(0,0,0,0.04)];
+  }
+  .card-dark {
+    @apply rounded-2xl bg-neutral-900 text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)];
+  }
+  .pill {
+    @apply inline-flex items-center gap-2 rounded-full bg-white border border-stone-200 px-3 py-1.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)];
+  }
+  .pill-accent {
+    @apply inline-flex items-center gap-2 rounded-full bg-rose-600 text-white px-3 py-1.5 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:bg-rose-700 transition;
+  }
+  .btn-primary {
+    @apply inline-flex h-10 items-center gap-2 rounded-full bg-rose-600 text-white px-5 text-sm font-medium hover:bg-rose-700 disabled:opacity-50 transition;
+  }
+  .btn-dark {
+    @apply inline-flex h-10 items-center gap-2 rounded-full bg-neutral-900 text-white px-5 text-sm font-medium hover:bg-neutral-800 disabled:opacity-50 transition;
+  }
+  .btn-ghost {
+    @apply inline-flex h-10 items-center gap-2 rounded-full bg-white border border-stone-200 px-4 text-sm hover:bg-stone-50 disabled:opacity-50 transition;
+  }
+  .input-base {
+    @apply h-11 w-full rounded-xl border border-stone-200 bg-white px-4 text-sm placeholder:text-stone-400 focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100 transition;
+  }
+  .label-base {
+    @apply block text-xs font-medium text-stone-500 mb-1.5;
+  }
+}
