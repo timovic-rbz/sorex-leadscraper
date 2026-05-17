@@ -106,12 +106,19 @@ export async function scrapeEmail(website: string): Promise<string> {
 
 export async function scrapeEmailsParallel(
   items: Array<{ uid: string; website: string }>,
-  options: { concurrency?: number; budgetMs?: number } = {},
+  options: {
+    concurrency?: number;
+    budgetMs?: number;
+    /** Wird nach jedem fertigen Lead (egal ob Erfolg) aufgerufen. */
+    onProgress?: (done: number, total: number) => void;
+  } = {},
 ): Promise<Map<string, string>> {
   const concurrency = options.concurrency ?? 8;
   // Hard deadline: damit der Vercel-Function-Timeout (10s/60s) nicht erst die ganze
   // Suche kippt. Was bis dahin geschafft ist, kommt zurück; Rest ist leerer String.
   const deadline = Date.now() + (options.budgetMs ?? 25_000);
+  const total = items.length;
+  let done = 0;
   const results = new Map<string, string>();
   const queue = [...items];
 
@@ -125,6 +132,8 @@ export async function scrapeEmailsParallel(
       } catch {
         results.set(item.uid, "");
       }
+      done++;
+      options.onProgress?.(done, total);
     }
   }
 
