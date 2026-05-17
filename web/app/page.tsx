@@ -7,6 +7,24 @@ type TabId = "single" | "bulk";
 type LeadWithStatus = Lead & { dbStatus: "neu" | "bekannt" };
 
 // ---------- helpers ----------
+/**
+ * Parst JSON-Antwort einer API-Route. Gibt sauberen Fehler aus, wenn Vercel
+ * stattdessen eine HTML-Error-Page liefert (z.B. FUNCTION_INVOCATION_TIMEOUT).
+ */
+async function readJsonOrThrow(r: Response, ctx: string): Promise<unknown> {
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (text.includes("FUNCTION_INVOCATION_TIMEOUT")) {
+      throw new Error(
+        `Timeout (${ctx}): zu viele Leads oder zu langsame Webseiten. Reduziere "Max. Leads" oder deaktiviere "E-Mails crawlen".`,
+      );
+    }
+    throw new Error(`HTTP ${r.status} (${ctx}): Antwort kein JSON. ${text.slice(0, 120)}`);
+  }
+}
+
 async function checkExisting(uids: string[]): Promise<Set<string>> {
   if (uids.length === 0) return new Set();
   const r = await fetch("/api/leads?action=check", {
@@ -15,7 +33,7 @@ async function checkExisting(uids: string[]): Promise<Set<string>> {
     body: JSON.stringify({ uids }),
   });
   if (!r.ok) return new Set();
-  const data = (await r.json()) as { existing: string[] };
+  const data = (await readJsonOrThrow(r, "leads-check")) as { existing: string[] };
   return new Set(data.existing);
 }
 
@@ -131,7 +149,7 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ort, dienstleistung: dl, source, maxResults, scrapeEmails }),
       });
-      const data = (await r.json()) as SearchResponse | { error: string };
+      const data = (await readJsonOrThrow(r, "search")) as SearchResponse | { error: string };
       if (!r.ok || "error" in data) throw new Error("error" in data ? data.error : `HTTP ${r.status}`);
       const leads = await annotate(data.leads);
       leads.sort((a, b) => {
@@ -481,7 +499,18 @@ function NumberField({ label, value, onChange, min, max, step }: { label: string
   return (
     <label className="block">
       <span className="label-base">{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step} onChange={(e) => onChange(Number(e.target.value))} className="input-base" />
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
+        }}
+        className="input-base"
+      />
     </label>
   );
 }

@@ -15,10 +15,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
 
-  const { ort, dienstleistung, source, maxResults, scrapeEmails } = body;
+  const { ort, dienstleistung, source, scrapeEmails } = body;
+  // Google liefert hart maximal 60 (3 Pages × 20). Höhere Werte verbrennen nur Quota
+  // und Zeit. Clamp auf [5, 60].
+  const maxResults = Math.min(60, Math.max(5, Number(body.maxResults) || 20));
   if (!ort || !dienstleistung) {
     return NextResponse.json({ error: "ort und dienstleistung sind Pflicht" }, { status: 400 });
   }
+
+  const startedAt = Date.now();
+  // Vercel Hobby = 10s, Pro = 60s. Wir lassen E-Mail-Crawl maximal 80% des
+  // Restbudgets verbrauchen, damit immer Zeit für die Response bleibt.
+  const totalBudgetMs = 55_000;
 
   let leads: Lead[];
   try {
@@ -35,7 +43,9 @@ export async function POST(req: Request) {
       .filter((l) => l.webseite && !l.email)
       .map((l) => ({ uid: l.uid, website: l.webseite }));
     if (targets.length > 0) {
-      const emails = await scrapeEmailsParallel(targets);
+      const remaining = totalBudgetMs - (Date.now() - startedAt);
+      const emailBudget = Math.max(5_000, Math.floor(remaining * 0.8));
+      const emails = await scrapeEmailsParallel(targets, { budgetMs: emailBudget });
       for (const l of leads) {
         const found = emails.get(l.uid);
         if (found) l.email = found;
