@@ -6,7 +6,92 @@ import type { Lead, List, SearchResponse, Source } from "@/lib/types";
 type TabId = "single" | "bulk";
 type LeadWithStatus = Lead & { dbStatus: "neu" | "bekannt" };
 
+/** Live-Status während eine Suche läuft. */
+type SearchProgress =
+  | { phase: "idle" }
+  | { phase: "places" } // wartet auf Places-API
+  | { phase: "places-done"; placesCount: number } // Places fertig, kein E-Mail-Crawl
+  | { phase: "emails"; placesCount: number; emailsDone: number; emailsTotal: number };
+
+interface SearchStreamEvent {
+  event: "places" | "emails" | "done" | "error";
+  count?: number;
+  done?: number;
+  total?: number;
+  result?: SearchResponse;
+  message?: string;
+}
+
+/**
+ * Konsumiert die NDJSON-Streaming-Response von /api/search und ruft onEvent für
+ * jede Zeile auf. Gibt am Ende das finale SearchResponse zurück (oder wirft).
+ */
+async function runStreamingSearch(
+  body: object,
+  onEvent: (e: SearchStreamEvent) => void,
+): Promise<SearchResponse> {
+  const r = await fetch("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.body) throw new Error("Streaming nicht unterstützt vom Browser.");
+
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: SearchResponse | null = null;
+  let errorMsg: string | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let evt: SearchStreamEvent;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        if (line.includes("FUNCTION_INVOCATION_TIMEOUT")) {
+          throw new Error(
+            'Timeout: zu viele Leads oder zu langsame Webseiten. Reduziere "Max. Leads" oder deaktiviere "E-Mails crawlen".',
+          );
+        }
+        continue;
+      }
+      onEvent(evt);
+      if (evt.event === "done" && evt.result) result = evt.result;
+      else if (evt.event === "error") errorMsg = evt.message ?? "Unbekannter Fehler";
+    }
+  }
+
+  if (errorMsg) throw new Error(errorMsg);
+  if (!result) throw new Error("Stream unvollständig (kein 'done'-Event).");
+  return result;
+}
+
 // ---------- helpers ----------
+/**
+ * Parst JSON-Antwort einer API-Route. Gibt sauberen Fehler aus, wenn Vercel
+ * stattdessen eine HTML-Error-Page liefert (z.B. FUNCTION_INVOCATION_TIMEOUT).
+ */
+async function readJsonOrThrow(r: Response, ctx: string): Promise<unknown> {
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (text.includes("FUNCTION_INVOCATION_TIMEOUT")) {
+      throw new Error(
+        `Timeout (${ctx}): zu viele Leads oder zu langsame Webseiten. Reduziere "Max. Leads" oder deaktiviere "E-Mails crawlen".`,
+      );
+    }
+    throw new Error(`HTTP ${r.status} (${ctx}): Antwort kein JSON. ${text.slice(0, 120)}`);
+  }
+}
+
 async function checkExisting(uids: string[]): Promise<Set<string>> {
   if (uids.length === 0) return new Set();
   const r = await fetch("/api/leads?action=check", {
@@ -15,7 +100,7 @@ async function checkExisting(uids: string[]): Promise<Set<string>> {
     body: JSON.stringify({ uids }),
   });
   if (!r.ok) return new Set();
-  const data = (await r.json()) as { existing: string[] };
+  const data = (await readJsonOrThrow(r, "leads-check")) as { existing: string[] };
   return new Set(data.existing);
 }
 
@@ -114,6 +199,7 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
   const [dl, setDl] = useState("");
   const [maxResults, setMaxResults] = useState(20);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<SearchProgress>({ phase: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ stats: SearchResponse; leads: LeadWithStatus[] } | null>(null);
 
@@ -125,14 +211,23 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
     setError(null);
     setLoading(true);
     setResult(null);
+    setProgress({ phase: "places" });
     try {
-      const r = await fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ort, dienstleistung: dl, source, maxResults, scrapeEmails }),
-      });
-      const data = (await r.json()) as SearchResponse | { error: string };
-      if (!r.ok || "error" in data) throw new Error("error" in data ? data.error : `HTTP ${r.status}`);
+      const data = await runStreamingSearch(
+        { ort, dienstleistung: dl, source, maxResults, scrapeEmails },
+        (evt) => {
+          if (evt.event === "places") {
+            setProgress({ phase: "places-done", placesCount: evt.count ?? 0 });
+          } else if (evt.event === "emails") {
+            setProgress((prev) => ({
+              phase: "emails",
+              placesCount: prev.phase === "places-done" || prev.phase === "emails" ? prev.placesCount : (evt.total ?? 0),
+              emailsDone: evt.done ?? 0,
+              emailsTotal: evt.total ?? 0,
+            }));
+          }
+        },
+      );
       const leads = await annotate(data.leads);
       leads.sort((a, b) => {
         if (a.dbStatus !== b.dbStatus) return a.dbStatus === "neu" ? -1 : 1;
@@ -143,6 +238,7 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      setProgress({ phase: "idle" });
     }
   }
 
@@ -161,6 +257,7 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
         </div>
       </div>
 
+      {loading && <ProgressPanel progress={progress} maxResults={maxResults} />}
       {error && <ErrorBanner message={error} />}
 
       {result && (
@@ -175,6 +272,51 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
   );
 }
 
+function ProgressPanel({ progress, maxResults }: { progress: SearchProgress; maxResults: number }) {
+  // Berechnung: 30% des Bars für Places-Phase, 70% für E-Mail-Crawl.
+  let percent = 0;
+  let label = "⏳ Suche läuft...";
+  let counter = "";
+
+  if (progress.phase === "places") {
+    percent = 10;
+    label = "🔍 Adressen werden geladen...";
+  } else if (progress.phase === "places-done") {
+    percent = 100; // kein E-Mail-Crawl → fertig
+    label = `✅ ${progress.placesCount} Leads gefunden`;
+    counter = `${progress.placesCount} / ${maxResults}`;
+  } else if (progress.phase === "emails") {
+    const emailFrac = progress.emailsTotal === 0 ? 0 : progress.emailsDone / progress.emailsTotal;
+    percent = 30 + emailFrac * 70;
+    label = "📧 E-Mails werden gecrawlt...";
+    counter = `${progress.emailsDone} / ${progress.emailsTotal}`;
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-stone-700">{label}</span>
+        {counter && (
+          <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-700 tabular-nums">
+            {counter}
+          </span>
+        )}
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100">
+        <div
+          className="h-full rounded-full bg-rose-600 transition-all duration-300 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      {progress.phase === "emails" && (
+        <p className="mt-2 text-xs text-stone-400">
+          {progress.placesCount} Adressen geladen · Websites parallel im Crawl (8 Threads)
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ---------- Bulk ----------
 function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boolean }) {
   const [orteText, setOrteText] = useState("");
@@ -182,6 +324,8 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
   const [maxResults, setMaxResults] = useState(20);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, current: "" });
+  /** Live-Status für die laufende /api/search innerhalb der Bulk-Iteration. */
+  const [innerProgress, setInnerProgress] = useState<SearchProgress>({ phase: "idle" });
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<LeadWithStatus[] | null>(null);
 
@@ -194,6 +338,7 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
     setErrors([]);
     setResult(null);
     setProgress({ done: 0, total: combos.length, current: "" });
+    setInnerProgress({ phase: "idle" });
 
     const all: Lead[] = [];
     const errs: string[] = [];
@@ -201,14 +346,24 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
     for (let i = 0; i < combos.length; i++) {
       const { ort, dl } = combos[i];
       setProgress({ done: i, total: combos.length, current: `${dl} in ${ort}` });
+      setInnerProgress({ phase: "places" });
       try {
-        const r = await fetch("/api/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ort, dienstleistung: dl, source, maxResults, scrapeEmails }),
-        });
-        const data = (await r.json()) as SearchResponse | { error: string };
-        if (!r.ok || "error" in data) throw new Error("error" in data ? data.error : `HTTP ${r.status}`);
+        const data = await runStreamingSearch(
+          { ort, dienstleistung: dl, source, maxResults, scrapeEmails },
+          (evt) => {
+            if (evt.event === "places") {
+              setInnerProgress({ phase: "places-done", placesCount: evt.count ?? 0 });
+            } else if (evt.event === "emails") {
+              setInnerProgress((prev) => ({
+                phase: "emails",
+                placesCount:
+                  prev.phase === "places-done" || prev.phase === "emails" ? prev.placesCount : (evt.total ?? 0),
+                emailsDone: evt.done ?? 0,
+                emailsTotal: evt.total ?? 0,
+              }));
+            }
+          },
+        );
         all.push(...data.leads);
       } catch (e) {
         errs.push(`${dl} in ${ort}: ${(e as Error).message}`);
@@ -228,6 +383,7 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
     setResult(annotated);
     setErrors(errs);
     setProgress({ done: combos.length, total: combos.length, current: "" });
+    setInnerProgress({ phase: "idle" });
     setRunning(false);
   }
 
@@ -251,6 +407,10 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
           )}
         </div>
       </div>
+
+      {running && innerProgress.phase !== "idle" && (
+        <ProgressPanel progress={innerProgress} maxResults={maxResults} />
+      )}
 
       {errors.length > 0 && (
         <details className="card p-4">
@@ -481,7 +641,18 @@ function NumberField({ label, value, onChange, min, max, step }: { label: string
   return (
     <label className="block">
       <span className="label-base">{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step} onChange={(e) => onChange(Number(e.target.value))} className="input-base" />
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
+        }}
+        className="input-base"
+      />
     </label>
   );
 }
