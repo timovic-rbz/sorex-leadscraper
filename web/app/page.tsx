@@ -13,64 +13,90 @@ type SearchProgress =
   | { phase: "places-done"; placesCount: number } // Places fertig, kein E-Mail-Crawl
   | { phase: "emails"; placesCount: number; emailsDone: number; emailsTotal: number };
 
-interface SearchStreamEvent {
-  event: "places" | "emails" | "done" | "error";
-  count?: number;
-  done?: number;
-  total?: number;
-  result?: SearchResponse;
-  message?: string;
-}
+/** Batch-Größe für /api/crawl-emails — klein genug für Vercel-Hobby-Timeout. */
+const EMAIL_BATCH_SIZE = 6;
 
 /**
- * Konsumiert die NDJSON-Streaming-Response von /api/search und ruft onEvent für
- * jede Zeile auf. Gibt am Ende das finale SearchResponse zurück (oder wirft).
+ * Führt die gesamte Lead-Pipeline aus:
+ *   1. POST /api/search          → Adressen (schnell, kein E-Mail-Crawl)
+ *   2. POST /api/crawl-emails    → in Chunks à 6 Websites, sequentiell
+ *      jeder Chunk bleibt unter 10s, kein Timeout-Risiko mehr.
+ *
+ * onProgress wird nach jedem Phasenwechsel + nach jedem fertigen E-Mail-Batch
+ * aufgerufen, damit der ProgressBar live wächst.
  */
-async function runStreamingSearch(
+async function runSearch(
   body: object,
-  onEvent: (e: SearchStreamEvent) => void,
+  scrapeEmails: boolean,
+  onProgress: (p: SearchProgress) => void,
 ): Promise<SearchResponse> {
+  onProgress({ phase: "places" });
+
   const r = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!r.body) throw new Error("Streaming nicht unterstützt vom Browser.");
+  const data = (await readJsonOrThrow(r, "search")) as SearchResponse | { error: string };
+  if (!r.ok || "error" in data) {
+    throw new Error("error" in data ? data.error : `HTTP ${r.status}`);
+  }
+  const leads = data.leads;
 
-  const reader = r.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let result: SearchResponse | null = null;
-  let errorMsg: string | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let evt: SearchStreamEvent;
-      try {
-        evt = JSON.parse(line);
-      } catch {
-        if (line.includes("FUNCTION_INVOCATION_TIMEOUT")) {
-          throw new Error(
-            'Timeout: zu viele Leads oder zu langsame Webseiten. Reduziere "Max. Leads" oder deaktiviere "E-Mails crawlen".',
-          );
-        }
-        continue;
-      }
-      onEvent(evt);
-      if (evt.event === "done" && evt.result) result = evt.result;
-      else if (evt.event === "error") errorMsg = evt.message ?? "Unbekannter Fehler";
-    }
+  if (!scrapeEmails || leads.length === 0) {
+    onProgress({ phase: "places-done", placesCount: leads.length });
+    return data;
   }
 
-  if (errorMsg) throw new Error(errorMsg);
-  if (!result) throw new Error("Stream unvollständig (kein 'done'-Event).");
-  return result;
+  const targets = leads
+    .filter((l) => l.webseite && !l.email)
+    .map((l) => ({ uid: l.uid, website: l.webseite }));
+
+  if (targets.length === 0) {
+    onProgress({ phase: "places-done", placesCount: leads.length });
+    return data;
+  }
+
+  onProgress({ phase: "emails", placesCount: leads.length, emailsDone: 0, emailsTotal: targets.length });
+
+  const emailMap = new Map<string, string>();
+  for (let i = 0; i < targets.length; i += EMAIL_BATCH_SIZE) {
+    const chunk = targets.slice(i, i + EMAIL_BATCH_SIZE);
+    try {
+      const cr = await fetch("/api/crawl-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: chunk }),
+      });
+      if (cr.ok) {
+        const cd = (await cr.json()) as { emails?: Record<string, string> };
+        for (const [uid, mail] of Object.entries(cd.emails ?? {})) {
+          if (mail) emailMap.set(uid, mail);
+        }
+      }
+    } catch {
+      // Chunk-Fehler ist nicht fatal — wir markieren betroffene Leads ohne E-Mail.
+    }
+    onProgress({
+      phase: "emails",
+      placesCount: leads.length,
+      emailsDone: Math.min(i + chunk.length, targets.length),
+      emailsTotal: targets.length,
+    });
+  }
+
+  for (const l of leads) {
+    const mail = emailMap.get(l.uid);
+    if (mail) l.email = mail;
+  }
+
+  return {
+    leads,
+    totalFound: leads.length,
+    withPhone: leads.filter((l) => l.telefon).length,
+    withWebsite: leads.filter((l) => l.webseite).length,
+    withEmail: leads.filter((l) => l.email).length,
+  };
 }
 
 // ---------- helpers ----------
@@ -213,20 +239,10 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
     setResult(null);
     setProgress({ phase: "places" });
     try {
-      const data = await runStreamingSearch(
-        { ort, dienstleistung: dl, source, maxResults, scrapeEmails },
-        (evt) => {
-          if (evt.event === "places") {
-            setProgress({ phase: "places-done", placesCount: evt.count ?? 0 });
-          } else if (evt.event === "emails") {
-            setProgress((prev) => ({
-              phase: "emails",
-              placesCount: prev.phase === "places-done" || prev.phase === "emails" ? prev.placesCount : (evt.total ?? 0),
-              emailsDone: evt.done ?? 0,
-              emailsTotal: evt.total ?? 0,
-            }));
-          }
-        },
+      const data = await runSearch(
+        { ort, dienstleistung: dl, source, maxResults },
+        scrapeEmails,
+        setProgress,
       );
       const leads = await annotate(data.leads);
       leads.sort((a, b) => {
@@ -348,21 +364,10 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
       setProgress({ done: i, total: combos.length, current: `${dl} in ${ort}` });
       setInnerProgress({ phase: "places" });
       try {
-        const data = await runStreamingSearch(
-          { ort, dienstleistung: dl, source, maxResults, scrapeEmails },
-          (evt) => {
-            if (evt.event === "places") {
-              setInnerProgress({ phase: "places-done", placesCount: evt.count ?? 0 });
-            } else if (evt.event === "emails") {
-              setInnerProgress((prev) => ({
-                phase: "emails",
-                placesCount:
-                  prev.phase === "places-done" || prev.phase === "emails" ? prev.placesCount : (evt.total ?? 0),
-                emailsDone: evt.done ?? 0,
-                emailsTotal: evt.total ?? 0,
-              }));
-            }
-          },
+        const data = await runSearch(
+          { ort, dienstleistung: dl, source, maxResults },
+          scrapeEmails,
+          setInnerProgress,
         );
         all.push(...data.leads);
       } catch (e) {
