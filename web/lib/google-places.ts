@@ -1,4 +1,5 @@
 import type { Lead } from "./types";
+import { getApiKey } from "./api-keys";
 
 const SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const FIELDS = [
@@ -38,8 +39,20 @@ export async function searchGoogle(
   maxResults = 20,
   apiKey?: string,
 ): Promise<Lead[]> {
-  const key = apiKey ?? process.env.GOOGLE_API_KEY;
-  if (!key) throw new Error("GOOGLE_API_KEY fehlt – setze ihn als Env-Var oder wähle OSM.");
+  // Reihenfolge: explizit übergebener Key → DB (Settings-Page) → Env-Var.
+  // Trim wegen Copy-Paste-Artefakten (CR/LF), sonst wirft fetch "The string did not match...".
+  const key = (apiKey ?? (await getApiKey("google_places")) ?? "").trim();
+  if (!key) {
+    throw new Error(
+      "Kein Google-Places-Key konfiguriert. Setze ihn unter Einstellungen oder als GOOGLE_API_KEY.",
+    );
+  }
+  if (!/^[A-Za-z0-9_\-]+$/.test(key)) {
+    throw new Error(
+      "Google-Places-Key enthält ungültige Zeichen (Zeilenumbruch, Leerzeichen o.ä.). " +
+        "Unter Einstellungen sauber neu einfügen.",
+    );
+  }
 
   const places: GooglePlace[] = [];
   let pageToken: string | undefined;
