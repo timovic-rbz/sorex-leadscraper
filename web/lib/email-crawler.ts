@@ -12,7 +12,9 @@ const CONTACT_PATHS = ["kontakt", "contact", "impressum", "ueber-uns", "about"];
 
 const PRIORITY = ["info@", "kontakt@", "hallo@", "hello@", "office@", "mail@"];
 
-const FETCH_TIMEOUT_MS = 8000;
+// 5s pro Seite: langsamere Seiten verlieren wir, aber im 10s-Hobby-Limit
+// schaffen wir damit zuverlässig 12 parallele Crawls inkl. Response-Buffer.
+const FETCH_TIMEOUT_MS = 5000;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
 
 async function fetchHtml(url: string): Promise<string | null> {

@@ -22,15 +22,16 @@ export async function POST(req: Request) {
 
   const items = (body.items ?? [])
     .filter((i): i is { uid: string; website: string } => Boolean(i.uid && i.website))
-    .slice(0, 10); // Hard-Cap: nie mehr als 10 pro Batch
+    .slice(0, 12); // Hard-Cap: 12 pro Batch (matched concurrency)
 
   if (items.length === 0) {
     return NextResponse.json({ emails: {} });
   }
 
   try {
-    // 8s Budget: hält 2s Buffer für Response + Cold-Start auf Hobby-Plan.
-    const result = await scrapeEmailsParallel(items, { budgetMs: 8_000, concurrency: 8 });
+    // 8s Budget + 5s Per-Site-Timeout + concurrency 12 → alle Sites laufen
+    // parallel, Batch fertig in ~5-6s. 2s Buffer für Response + Cold-Start.
+    const result = await scrapeEmailsParallel(items, { budgetMs: 8_000, concurrency: 12 });
     const emails: Record<string, string> = {};
     for (const [uid, email] of result) emails[uid] = email;
     return NextResponse.json({ emails });

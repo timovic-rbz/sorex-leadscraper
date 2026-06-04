@@ -22,7 +22,11 @@ export async function POST(req: Request) {
   }
 
   const { ort, dienstleistung, source } = body;
-  const maxResults = Math.min(60, Math.max(5, Number(body.maxResults) || 20));
+  // Source-spezifisches Cap: Google Places API kann max 60 pro Text-Query
+  // (3 Pages × 20, harte Grenze). OSM hat kein Limit; 200 ist freiwilliger
+  // Schutz vor Overpass-Überlast und endlosem Email-Crawl.
+  const sourceCap = source === "google" ? 60 : 200;
+  const maxResults = Math.min(sourceCap, Math.max(5, Number(body.maxResults) || 20));
   if (!ort || !dienstleistung) {
     return NextResponse.json({ error: "ort und dienstleistung sind Pflicht" }, { status: 400 });
   }

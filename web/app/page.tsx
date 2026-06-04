@@ -13,14 +13,16 @@ type SearchProgress =
   | { phase: "places-done"; placesCount: number } // Places fertig, kein E-Mail-Crawl
   | { phase: "emails"; placesCount: number; emailsDone: number; emailsTotal: number };
 
-/** Batch-Größe für /api/crawl-emails — klein genug für Vercel-Hobby-Timeout. */
-const EMAIL_BATCH_SIZE = 6;
+/** Batch-Größe für /api/crawl-emails — passt knapp ins Vercel-Hobby-10s-Limit
+ * (8 Sites × 5s Timeout / 12 Worker = ~5-6s pro Batch). */
+const EMAIL_BATCH_SIZE = 8;
 
 /**
  * Führt die gesamte Lead-Pipeline aus:
  *   1. POST /api/search          → Adressen (schnell, kein E-Mail-Crawl)
- *   2. POST /api/crawl-emails    → in Chunks à 6 Websites, sequentiell
- *      jeder Chunk bleibt unter 10s, kein Timeout-Risiko mehr.
+ *   2. POST /api/crawl-emails    → in Chunks à 8 Websites, ALLE PARALLEL
+ *      jeder Chunk bleibt unter 10s, und alle Chunks laufen gleichzeitig
+ *      statt nacheinander → ~5x schneller bei vielen Leads.
  *
  * onProgress wird nach jedem Phasenwechsel + nach jedem fertigen E-Mail-Batch
  * aufgerufen, damit der ProgressBar live wächst.
@@ -59,31 +61,43 @@ async function runSearch(
 
   onProgress({ phase: "emails", placesCount: leads.length, emailsDone: 0, emailsTotal: targets.length });
 
-  const emailMap = new Map<string, string>();
+  // In Chunks splitten — danach ALLE parallel feuern statt sequenziell.
+  // Pro Chunk eigene Vercel-Function-Invocation, jede ~5-6s. Total bleibt damit
+  // ~5-6s statt N×6s.
+  const chunks: typeof targets[] = [];
   for (let i = 0; i < targets.length; i += EMAIL_BATCH_SIZE) {
-    const chunk = targets.slice(i, i + EMAIL_BATCH_SIZE);
-    try {
-      const cr = await fetch("/api/crawl-emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: chunk }),
-      });
-      if (cr.ok) {
-        const cd = (await cr.json()) as { emails?: Record<string, string> };
-        for (const [uid, mail] of Object.entries(cd.emails ?? {})) {
-          if (mail) emailMap.set(uid, mail);
-        }
-      }
-    } catch {
-      // Chunk-Fehler ist nicht fatal — wir markieren betroffene Leads ohne E-Mail.
-    }
-    onProgress({
-      phase: "emails",
-      placesCount: leads.length,
-      emailsDone: Math.min(i + chunk.length, targets.length),
-      emailsTotal: targets.length,
-    });
+    chunks.push(targets.slice(i, i + EMAIL_BATCH_SIZE));
   }
+
+  const emailMap = new Map<string, string>();
+  let emailsDone = 0;
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const cr = await fetch("/api/crawl-emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: chunk }),
+        });
+        if (cr.ok) {
+          const cd = (await cr.json()) as { emails?: Record<string, string> };
+          for (const [uid, mail] of Object.entries(cd.emails ?? {})) {
+            if (mail) emailMap.set(uid, mail);
+          }
+        }
+      } catch {
+        // Chunk-Fehler ist nicht fatal — betroffene Leads bleiben ohne E-Mail.
+      }
+      emailsDone += chunk.length;
+      onProgress({
+        phase: "emails",
+        placesCount: leads.length,
+        emailsDone: Math.min(emailsDone, targets.length),
+        emailsTotal: targets.length,
+      });
+    }),
+  );
 
   for (const l of leads) {
     const mail = emailMap.get(l.uid);
@@ -264,7 +278,14 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[2fr_2fr_1fr_auto]">
           <Field label="Ort" value={ort} onChange={setOrt} placeholder="z.B. Düsseldorf" />
           <Field label="Dienstleistung" value={dl} onChange={setDl} placeholder="z.B. Kosmetik" />
-          <NumberField label="Max. Leads" value={maxResults} onChange={setMaxResults} min={5} max={60} step={5} />
+          <NumberField
+            label={`Max. Leads ${source === "google" ? "(max 60)" : "(max 200)"}`}
+            value={maxResults}
+            onChange={setMaxResults}
+            min={5}
+            max={source === "google" ? 60 : 200}
+            step={5}
+          />
           <div className="flex items-end">
             <button onClick={run} disabled={loading} className="btn-primary w-full md:w-auto">
               {loading ? "⏳ Suche..." : "🚀 Leads suchen"}
@@ -399,7 +420,14 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[2fr_2fr_1fr]">
           <TextField label={`Orte – ${orte.length}`} value={orteText} onChange={setOrteText} placeholder={"Düsseldorf\nKöln\nLangenfeld"} rows={6} />
           <TextField label={`Dienstleistungen – ${dls.length}`} value={dlText} onChange={setDlText} placeholder={"Kosmetik\nFriseur"} rows={6} />
-          <NumberField label="Max pro Suche" value={maxResults} onChange={setMaxResults} min={5} max={60} step={5} />
+          <NumberField
+            label={`Max pro Suche ${source === "google" ? "(max 60)" : "(max 200)"}`}
+            value={maxResults}
+            onChange={setMaxResults}
+            min={5}
+            max={source === "google" ? 60 : 200}
+            step={5}
+          />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button disabled={running || combos.length === 0} onClick={run} className="btn-primary">
