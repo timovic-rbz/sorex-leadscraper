@@ -565,7 +565,19 @@ function SaveBar({ leads, defaultListName }: { leads: LeadWithStatus[]; defaultL
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leads, listId }),
       });
-      const data = (await r.json()) as { inserted?: number; updated?: number; error?: string };
+      // Bei Function-Timeout liefert Vercel HTML statt JSON → r.json() würde
+      // werfen mit einer nichtssagenden Fehlermeldung. Lieber erstmal als Text
+      // lesen und sauber unterscheiden.
+      const raw = await r.text();
+      let data: { inserted?: number; updated?: number; error?: string } = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `HTTP ${r.status} – Server antwortete nicht mit JSON (vermutlich Timeout). ` +
+            `Versuche es mit weniger Leads pro Speicher-Aktion.`,
+        );
+      }
       if (!r.ok || data.error) throw new Error(data.error ?? `HTTP ${r.status}`);
       setMsg(`✅ ${data.inserted} neu, ${data.updated} aktualisiert.`);
       if (selected === "__new__") {
