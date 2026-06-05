@@ -116,24 +116,60 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 }
 
 function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
+  const noWebsite = !lead.webseite;
+  const today = parseTodayHours(lead.oeffnungszeiten);
   return (
     <button
       onClick={onClick}
       className="rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm"
     >
-      <div className="font-medium text-stone-900">{lead.firmenname}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium text-stone-900">{lead.firmenname}</div>
+        {noWebsite && (
+          <span
+            title="Kein Webauftritt"
+            className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
+          >
+            🌐✗ Keine Website
+          </span>
+        )}
+      </div>
       {lead.telefon && (
-        <div className="mt-1 flex items-center gap-1 text-xs text-rose-600">
+        <div className="mt-2 flex items-center gap-1.5 text-base font-semibold text-rose-600">
           <PhoneIcon /> {lead.telefon}
         </div>
       )}
-      {lead.adresse && <div className="mt-1 truncate text-xs text-stone-500">{lead.adresse}</div>}
+      {today && (
+        <div
+          className={`mt-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+            today.closed ? "bg-stone-100 text-stone-500" : "bg-emerald-50 text-emerald-700"
+          }`}
+        >
+          <span>🕒</span>
+          <span>Heute: {today.label}</span>
+        </div>
+      )}
+      {lead.adresse && <div className="mt-1.5 truncate text-xs text-stone-500">{lead.adresse}</div>}
       <div className="mt-2 flex items-center justify-between text-[10px] text-stone-400">
         <span>{lead.callCount > 0 ? `${lead.callCount}× angerufen` : "noch nicht versucht"}</span>
         <span>{lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}</span>
       </div>
     </button>
   );
+}
+
+const DAY_NAMES_DE = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+
+function parseTodayHours(raw: string | null | undefined): { label: string; closed: boolean } | null {
+  if (!raw) return null;
+  const todayName = DAY_NAMES_DE[new Date().getDay()];
+  const parts = raw.split("|").map((p) => p.trim());
+  const todayPart = parts.find((p) => p.toLowerCase().startsWith(todayName.toLowerCase() + ":"));
+  if (!todayPart) return null;
+  const value = todayPart.slice(todayPart.indexOf(":") + 1).trim().replace(/\s*Uhr\s*$/i, "");
+  if (!value) return null;
+  const closed = /geschlossen/i.test(value);
+  return { label: closed ? "geschlossen" : value, closed };
 }
 
 // ============================================================================
