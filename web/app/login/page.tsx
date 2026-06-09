@@ -211,9 +211,6 @@ export default function LoginPage() {
                   className="input-base"
                   autoFocus
                 />
-                <span className="mt-1 block text-xs text-stone-400">
-                  In den Einstellungen änderbar oder als <code>APP_PASSWORD</code> in den Server-Env-Vars.
-                </span>
               </label>
 
               <button
