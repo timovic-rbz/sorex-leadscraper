@@ -7,7 +7,7 @@ import {
   isAuthConfigured,
   signSession,
 } from "@/lib/auth";
-import { dbCountSetters, dbVerifySetterPin } from "@/lib/db";
+import { dbCountSetters, dbGetAdminPassword, dbVerifySetterPin } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
@@ -55,10 +55,14 @@ export async function POST(req: Request) {
 
   // 2) Bootstrap-Admin (für Setup, wenn noch kein Setter existiert)
   if (body.password) {
-    if (!hasBootstrapPassword()) {
-      return NextResponse.json({ error: "Bootstrap-Login nicht konfiguriert" }, { status: 400 });
-    }
-    if (!checkBootstrapPassword(body.password)) {
+    const dbPw = await dbGetAdminPassword().catch(() => null);
+    // DB-Passwort hat Vorrang. Env-Variable bleibt als Recovery-Pfad ("PW vergessen") aktiv.
+    const dbOk = Boolean(dbPw && dbPw === body.password);
+    const envOk = hasBootstrapPassword() && checkBootstrapPassword(body.password);
+    if (!dbOk && !envOk) {
+      if (!dbPw && !hasBootstrapPassword()) {
+        return NextResponse.json({ error: "Admin-Login nicht konfiguriert" }, { status: 400 });
+      }
       return NextResponse.json({ error: "Falsches Passwort" }, { status: 401 });
     }
     const count = await dbCountSetters().catch(() => 0);

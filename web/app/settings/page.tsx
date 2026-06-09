@@ -64,6 +64,16 @@ export default function SettingsPage() {
       </section>
 
       <section className="mt-12 space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Admin-Passwort</h2>
+        <p className="text-sm text-stone-500">
+          Master-Passwort für den „Admin-Login" auf der Login-Seite. Wenn hier nichts gesetzt ist,
+          gilt das Server-Env <code className="rounded bg-stone-100 px-1 py-0.5 text-xs">APP_PASSWORD</code>.
+          Beides parallel aktiv – das Env bleibt als Recovery, falls du das UI-Passwort vergisst.
+        </p>
+        <AdminPasswordSection />
+      </section>
+
+      <section className="mt-12 space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Team (Setter)</h2>
         <p className="text-sm text-stone-500">
           Wer darf sich einloggen und Leads bearbeiten? Setter sehen nur Listen + Leaderboard.
@@ -71,6 +81,172 @@ export default function SettingsPage() {
         </p>
         <TeamSection />
       </section>
+    </div>
+  );
+}
+
+function AdminPasswordSection() {
+  const [status, setStatus] = useState<{ dbConfigured: boolean; envConfigured: boolean } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function load() {
+    try {
+      const r = await fetch("/api/admin-password");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = (await r.json()) as { dbConfigured: boolean; envConfigured: boolean };
+      setStatus(d);
+    } catch (e) {
+      setMsg({ kind: "err", text: (e as Error).message });
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function save() {
+    setMsg(null);
+    if (pw1.length < 4) {
+      setMsg({ kind: "err", text: "Mindestens 4 Zeichen." });
+      return;
+    }
+    if (pw1 !== pw2) {
+      setMsg({ kind: "err", text: "Passwörter stimmen nicht überein." });
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/admin-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw1 }),
+      });
+      const d = (await r.json()) as { ok?: boolean; error?: string };
+      if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setMsg({ kind: "ok", text: "Passwort gespeichert." });
+      setPw1("");
+      setPw2("");
+      setEditing(false);
+      load();
+    } catch (e) {
+      setMsg({ kind: "err", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    if (!confirm("UI-Passwort entfernen? Danach gilt wieder nur das Server-Env APP_PASSWORD.")) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/admin-password", { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setMsg({ kind: "ok", text: "UI-Passwort entfernt." });
+      load();
+    } catch (e) {
+      setMsg({ kind: "err", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      {status === null && <p className="text-sm text-stone-500">Lade...</p>}
+
+      {status && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          {status.dbConfigured ? (
+            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 font-medium text-emerald-700">
+              ✓ UI-Passwort aktiv
+            </span>
+          ) : (
+            <span className="rounded-full bg-stone-100 px-2.5 py-0.5 font-medium text-stone-600">
+              kein UI-Passwort
+            </span>
+          )}
+          {status.envConfigured ? (
+            <span className="rounded-full bg-blue-100 px-2.5 py-0.5 font-medium text-blue-700">
+              ⛑ Env-Recovery aktiv
+            </span>
+          ) : (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-medium text-amber-700">
+              ⚠ Kein Env-Recovery
+            </span>
+          )}
+        </div>
+      )}
+
+      {!editing && (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setEditing(true)} className="btn-primary">
+            {status?.dbConfigured ? "✏️ Ändern" : "+ Passwort setzen"}
+          </button>
+          {status?.dbConfigured && (
+            <button
+              onClick={clear}
+              disabled={busy}
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-rose-200 bg-white px-4 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50 transition"
+            >
+              🗑 Entfernen
+            </button>
+          )}
+        </div>
+      )}
+
+      {editing && (
+        <div className="space-y-3">
+          <label className="block">
+            <span className="label-base">Neues Passwort (min. 4 Zeichen)</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={pw1}
+              onChange={(e) => setPw1(e.target.value)}
+              className="input-base"
+            />
+          </label>
+          <label className="block">
+            <span className="label-base">Wiederholen</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={pw2}
+              onChange={(e) => setPw2(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+              className="input-base"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button onClick={save} disabled={busy || !pw1 || !pw2} className="btn-primary">
+              {busy ? "Speichere..." : "💾 Speichern"}
+            </button>
+            <button
+              onClick={() => {
+                setEditing(false);
+                setPw1("");
+                setPw2("");
+                setMsg(null);
+              }}
+              className="btn-ghost"
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <p className={`mt-3 text-sm ${msg.kind === "ok" ? "text-emerald-700" : "text-rose-700"}`}>
+          {msg.kind === "ok" ? "✅ " : "❌ "}
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }

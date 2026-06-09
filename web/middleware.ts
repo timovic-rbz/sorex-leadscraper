@@ -12,6 +12,7 @@ const ADMIN_ONLY_PREFIXES = [
   "/api/crawl-emails",
   "/api/settings",
   "/api/setters", // CRUD (Public-Endpoint liegt unter /api/setters/public)
+  "/api/admin-password",
 ];
 
 function isAdminOnly(path: string): boolean {

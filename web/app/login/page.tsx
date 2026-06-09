@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [pin, setPin] = useState("");
   const [bootstrapPw, setBootstrapPw] = useState("");
   const [showBootstrap, setShowBootstrap] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pinInputRef = useRef<HTMLInputElement | null>(null);
@@ -179,12 +180,19 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <div className="mt-6 border-t border-stone-100 pt-4 text-center">
+              <div className="mt-6 flex items-center justify-center gap-3 border-t border-stone-100 pt-4 text-xs">
                 <button
                   onClick={() => setShowBootstrap(true)}
-                  className="text-xs text-stone-500 hover:text-stone-700 hover:underline"
+                  className="text-stone-500 hover:text-stone-700 hover:underline"
                 >
                   Admin-Login
+                </button>
+                <span className="text-stone-300">·</span>
+                <button
+                  onClick={() => setShowForgot(true)}
+                  className="text-stone-500 hover:text-stone-700 hover:underline"
+                >
+                  Passwort vergessen?
                 </button>
               </div>
             </>
@@ -204,7 +212,7 @@ export default function LoginPage() {
                   autoFocus
                 />
                 <span className="mt-1 block text-xs text-stone-400">
-                  APP_PASSWORD aus den Server-Env-Vars.
+                  In den Einstellungen änderbar oder als <code>APP_PASSWORD</code> in den Server-Env-Vars.
                 </span>
               </label>
 
@@ -216,12 +224,19 @@ export default function LoginPage() {
                 {busy ? "Anmelde..." : "Als Admin anmelden"}
               </button>
 
-              <div className="mt-6 border-t border-stone-100 pt-4 text-center">
+              <div className="mt-6 flex items-center justify-center gap-3 border-t border-stone-100 pt-4 text-xs">
                 <button
                   onClick={() => setShowBootstrap(false)}
-                  className="text-xs text-stone-500 hover:text-stone-700 hover:underline"
+                  className="text-stone-500 hover:text-stone-700 hover:underline"
                 >
-                  ← Zurück zum Setter-Login
+                  ← Setter-Login
+                </button>
+                <span className="text-stone-300">·</span>
+                <button
+                  onClick={() => setShowForgot(true)}
+                  className="text-stone-500 hover:text-stone-700 hover:underline"
+                >
+                  Passwort vergessen?
                 </button>
               </div>
             </div>
@@ -233,6 +248,66 @@ export default function LoginPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}
+    </div>
+  );
+}
+
+function ForgotPasswordModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h2 className="text-xl font-bold">🔑 Passwort vergessen?</h2>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-4 text-sm text-stone-600">
+          <div className="rounded-2xl bg-stone-50 p-4">
+            <div className="mb-1 font-semibold text-stone-900">Du bist Setter?</div>
+            <p>
+              PINs werden vom Admin verwaltet. Sag deinem Admin Bescheid – er kann dir in den
+              Einstellungen unter <em>Team</em> eine neue PIN setzen.
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-stone-50 p-4">
+            <div className="mb-1 font-semibold text-stone-900">Du bist Admin?</div>
+            <ol className="list-inside list-decimal space-y-1.5">
+              <li>
+                Wenn du das Passwort in den Einstellungen geändert hast: Das ursprüngliche{" "}
+                <code className="rounded bg-white px-1.5 py-0.5 text-xs">APP_PASSWORD</code> aus den
+                Server-Env-Vars funktioniert weiterhin als Recovery.
+              </li>
+              <li>
+                Damit einloggen → <em>Einstellungen → Admin-Passwort</em> → neues setzen oder
+                entfernen.
+              </li>
+              <li>
+                Auf Vercel: <em>Project → Settings → Environment Variables</em> →{" "}
+                <code className="rounded bg-white px-1.5 py-0.5 text-xs">APP_PASSWORD</code>{" "}
+                ändern → neu deployen.
+              </li>
+            </ol>
+          </div>
+        </div>
+
+        <button onClick={onClose} className="btn-primary mt-5 w-full justify-center">
+          Verstanden
+        </button>
       </div>
     </div>
   );

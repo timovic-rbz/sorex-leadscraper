@@ -161,6 +161,29 @@ export async function dbDeleteApiKey(provider: string): Promise<void> {
 }
 
 // =============================================================================
+// ADMIN-PASSWORT (DB-gespeichert, optional)
+// =============================================================================
+// Wird im api_keys-Table unter reserviertem Schlüssel abgelegt; /api/settings
+// listet nur konfigurierte PROVIDERS, sodass dieser Eintrag dort nicht auftaucht.
+// Bleibt das Feld leer/null, gilt weiterhin process.env.APP_PASSWORD als Login.
+
+const ADMIN_PW_KEY = "__admin_password";
+
+export async function dbGetAdminPassword(): Promise<string | null> {
+  return dbGetApiKey(ADMIN_PW_KEY);
+}
+
+export async function dbSetAdminPassword(value: string): Promise<void> {
+  const v = value.trim();
+  if (v.length < 4) throw new Error("Passwort muss mindestens 4 Zeichen haben");
+  await dbSetApiKey(ADMIN_PW_KEY, v);
+}
+
+export async function dbClearAdminPassword(): Promise<void> {
+  await dbDeleteApiKey(ADMIN_PW_KEY);
+}
+
+// =============================================================================
 // LISTS
 // =============================================================================
 
