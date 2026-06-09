@@ -63,26 +63,28 @@ export default function LeaderboardPage() {
   const countdownMs = nextWindowEnd(win, now) - now;
 
   return (
-    <div className="mx-auto max-w-6xl p-6 lg:p-10">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight">🏆 Leaderboard</h1>
-          <p className="mt-2 text-sm text-stone-500">
-            Wer hat am meisten gesettet? Punkte: 1× Interessiert · 2× Call vereinbart · 5× Kunde.
-          </p>
-        </div>
-        <div className="flex gap-1 rounded-full bg-stone-100 p-1">
-          {(Object.keys(WINDOW_LABELS) as Win[]).map((w) => (
-            <button
-              key={w}
-              onClick={() => setWin(w)}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-                win === w ? "bg-white text-stone-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
-              }`}
-            >
-              {WINDOW_LABELS[w]}
-            </button>
-          ))}
+    <div className="mx-auto max-w-6xl p-4 lg:p-10">
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-4xl">🏆 Leaderboard</h1>
+        <p className="mt-1 text-xs text-stone-500 sm:mt-2 sm:text-sm">
+          Punkte: 1×🔥 · 2×📅 · 5×🏆
+        </p>
+
+        {/* Tabs – auf mobile horizontal scrollbar, kein Wrap */}
+        <div className="-mx-4 mt-4 overflow-x-auto px-4 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="inline-flex gap-1 rounded-full bg-stone-100 p-1">
+            {(Object.keys(WINDOW_LABELS) as Win[]).map((w) => (
+              <button
+                key={w}
+                onClick={() => setWin(w)}
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition sm:px-4 sm:text-sm ${
+                  win === w ? "bg-white text-stone-900 shadow-sm" : "text-stone-600 hover:text-stone-900"
+                }`}
+              >
+                {WINDOW_LABELS[w]}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -106,35 +108,35 @@ export default function LeaderboardPage() {
           {/* ============================================================
               Stage – heller Hero mit Podium-Effekt
               ============================================================ */}
-          <div className="relative mb-6 overflow-hidden rounded-3xl border border-stone-200 bg-gradient-to-b from-rose-50/60 via-white to-amber-50/40 px-6 py-10 lg:px-12 lg:py-14">
+          <div className="relative mb-6 overflow-hidden rounded-2xl border border-stone-200 bg-gradient-to-b from-rose-50/60 via-white to-amber-50/40 px-3 py-6 sm:rounded-3xl sm:px-6 sm:py-10 lg:px-12 lg:py-14">
             {/* Spotlight auf den Sieger */}
             <div
-              className="pointer-events-none absolute left-1/2 top-0 h-72 w-[480px] -translate-x-1/2 rounded-full bg-amber-200/40 blur-3xl"
+              className="pointer-events-none absolute left-1/2 top-0 h-56 w-[320px] -translate-x-1/2 rounded-full bg-amber-200/40 blur-3xl sm:h-72 sm:w-[480px]"
               aria-hidden
             />
 
-            <div className="relative grid grid-cols-3 items-end gap-3 sm:gap-6">
+            <div className="relative grid grid-cols-3 items-end gap-2 sm:gap-6">
               <PodiumColumn row={podium[1]} place={2} highlight={me?.setterId === podium[1]?.setterId} />
               <PodiumColumn row={podium[0]} place={1} highlight={me?.setterId === podium[0]?.setterId} />
               <PodiumColumn row={podium[2]} place={3} highlight={me?.setterId === podium[2]?.setterId} />
             </div>
 
             {/* Countdown + persönlicher Status */}
-            <div className="relative mt-8 flex flex-wrap items-center justify-center gap-3 text-sm">
+            <div className="relative mt-5 flex flex-wrap items-center justify-center gap-2 text-xs sm:mt-8 sm:gap-3 sm:text-sm">
               {win !== "all" && countdownMs > 0 && (
-                <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-4 py-2 font-medium text-stone-700 shadow-sm">
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white/90 px-3 py-1.5 font-medium text-stone-700 shadow-sm sm:gap-2 sm:px-4 sm:py-2">
                   <span aria-hidden>⏰</span>
                   <span>Endet in {formatCountdown(countdownMs)}</span>
                 </div>
               )}
               {myRow && myRank && (
                 <div
-                  className="inline-flex items-center gap-2 rounded-full px-4 py-2 font-medium text-white shadow-sm"
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium text-white shadow-sm sm:gap-2 sm:px-4 sm:py-2"
                   style={{ background: myRow.color }}
                 >
                   <span aria-hidden>✦</span>
                   <span>
-                    Du hast {myRow.score} Pkt heute · Platz {myRank} von {sorted.length}
+                    Du · {myRow.score} Pkt · Platz {myRank}/{sorted.length}
                   </span>
                 </div>
               )}
@@ -172,10 +174,11 @@ export default function LeaderboardPage() {
           </div>
 
           {/* ============================================================
-              Volle Rangliste
+              Volle Rangliste – Tabelle auf sm+, Card-Liste auf mobile
               ============================================================ */}
           <div className="card overflow-hidden p-0">
-            <div className="grid grid-cols-[60px_minmax(0,1fr)_repeat(4,minmax(0,80px))_minmax(80px,120px)] items-center gap-3 border-b border-stone-100 bg-stone-50/60 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 sm:gap-6 sm:px-6">
+            {/* Tabellen-Header nur ab sm */}
+            <div className="hidden sm:grid grid-cols-[60px_minmax(0,1fr)_repeat(4,minmax(0,80px))_minmax(80px,120px)] items-center gap-3 border-b border-stone-100 bg-stone-50/60 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-stone-500 sm:gap-6 sm:px-6">
               <div>Rang</div>
               <div>Setter</div>
               <div className="text-right">🔥</div>
@@ -229,28 +232,28 @@ function PodiumColumn({
   // Platz 1 ist größer, breiter und höher
   const cfg = {
     1: {
-      avatar: "h-24 w-24 sm:h-28 sm:w-28 text-2xl ring-4 ring-amber-200",
-      podiumHeight: "h-44 sm:h-52",
+      avatar: "h-16 w-16 sm:h-28 sm:w-28 text-base sm:text-2xl ring-2 sm:ring-4 ring-amber-200",
+      podiumHeight: "h-32 sm:h-52",
       gradient: "from-amber-300 via-amber-400 to-amber-500",
       medal: "🥇",
-      nameSize: "text-base sm:text-lg",
-      scoreSize: "text-3xl sm:text-4xl",
+      nameSize: "text-xs sm:text-lg",
+      scoreSize: "text-xl sm:text-4xl",
     },
     2: {
-      avatar: "h-20 w-20 sm:h-24 sm:w-24 text-xl ring-4 ring-stone-200",
-      podiumHeight: "h-32 sm:h-36",
+      avatar: "h-12 w-12 sm:h-24 sm:w-24 text-xs sm:text-xl ring-2 sm:ring-4 ring-stone-200",
+      podiumHeight: "h-24 sm:h-36",
       gradient: "from-stone-300 via-stone-400 to-stone-500",
       medal: "🥈",
-      nameSize: "text-sm sm:text-base",
-      scoreSize: "text-2xl sm:text-3xl",
+      nameSize: "text-xs sm:text-base",
+      scoreSize: "text-base sm:text-3xl",
     },
     3: {
-      avatar: "h-20 w-20 sm:h-24 sm:w-24 text-xl ring-4 ring-orange-200",
-      podiumHeight: "h-24 sm:h-28",
+      avatar: "h-12 w-12 sm:h-24 sm:w-24 text-xs sm:text-xl ring-2 sm:ring-4 ring-orange-200",
+      podiumHeight: "h-20 sm:h-28",
       gradient: "from-orange-300 via-orange-400 to-orange-500",
       medal: "🥉",
-      nameSize: "text-sm sm:text-base",
-      scoreSize: "text-2xl sm:text-3xl",
+      nameSize: "text-xs sm:text-base",
+      scoreSize: "text-base sm:text-3xl",
     },
   }[place];
 
@@ -271,17 +274,21 @@ function PodiumColumn({
         </div>
       </div>
 
-      <div className={`mt-4 font-semibold text-stone-900 ${cfg.nameSize}`}>{row.name}</div>
-      <div className="text-xs text-stone-500">{row.totalSet} gesettet</div>
+      <div className={`mt-2 truncate max-w-full text-center font-semibold text-stone-900 sm:mt-4 ${cfg.nameSize}`}>
+        {row.name}
+      </div>
+      <div className="text-[10px] text-stone-500 sm:text-xs">{row.totalSet} gesettet</div>
 
       {/* Pedestal */}
       <div
-        className={`mt-4 w-full overflow-hidden rounded-t-2xl bg-gradient-to-b text-white shadow-inner ${cfg.gradient} ${cfg.podiumHeight}`}
+        className={`mt-2 w-full overflow-hidden rounded-t-xl bg-gradient-to-b text-white shadow-inner sm:mt-4 sm:rounded-t-2xl ${cfg.gradient} ${cfg.podiumHeight}`}
       >
-        <div className="flex h-full flex-col items-center justify-start pt-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider opacity-90">Platz {place}</div>
+        <div className="flex h-full flex-col items-center justify-start pt-2 sm:pt-3">
+          <div className="text-[8px] font-semibold uppercase tracking-wider opacity-90 sm:text-[10px]">
+            Platz {place}
+          </div>
           <div className={`mt-1 font-bold leading-none tabular-nums ${cfg.scoreSize}`}>{row.score}</div>
-          <div className="mt-1 text-[10px] uppercase tracking-wider opacity-90">Punkte</div>
+          <div className="mt-1 text-[8px] uppercase tracking-wider opacity-90 sm:text-[10px]">Pkt</div>
         </div>
       </div>
     </div>
@@ -307,41 +314,81 @@ function RankRow({
   const placeBadge = place === 1 ? "🥇" : place === 2 ? "🥈" : place === 3 ? "🥉" : `#${place}`;
 
   return (
-    <div
-      className={`grid grid-cols-[60px_minmax(0,1fr)_repeat(4,minmax(0,80px))_minmax(80px,120px)] items-center gap-3 px-4 py-3 transition sm:gap-6 sm:px-6 ${
-        isMe ? "bg-rose-50/50" : "hover:bg-stone-50"
-      }`}
-    >
-      <div className="text-base font-semibold text-stone-500">{placeBadge}</div>
-      <div className="flex items-center gap-3 min-w-0">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-          style={{ background: row.color }}
-        >
-          {initials(row.name)}
+    <div className={`transition ${isMe ? "bg-rose-50/50" : "hover:bg-stone-50"}`}>
+      {/* ============ Mobile: kompakte Card-Reihe ============ */}
+      <div className="flex flex-col gap-2 px-4 py-3 sm:hidden">
+        <div className="flex items-center gap-3">
+          <div className="w-7 shrink-0 text-center text-sm font-semibold text-stone-500">
+            {placeBadge}
+          </div>
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            style={{ background: row.color }}
+          >
+            {initials(row.name)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-stone-900">{row.name}</span>
+              {isMe && (
+                <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-rose-700">
+                  Du
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-base font-bold tabular-nums text-stone-900">{row.score}</div>
+            <div className="text-[9px] uppercase tracking-wider text-stone-400">Pkt</div>
+          </div>
         </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-stone-900">
-            {row.name}
-            {isMe && (
-              <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700">
-                Du
-              </span>
-            )}
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-stone-100">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${pct}%`, background: row.color }}
-            />
-          </div>
+        <div className="ml-10 flex items-center gap-3 text-[11px] text-stone-500">
+          <span>🔥 {row.interested}</span>
+          <span>📅 {row.callScheduled}</span>
+          <span>🏆 {row.won}</span>
+          <span>📞 {row.totalCalls}</span>
+        </div>
+        <div className="ml-10 h-1.5 overflow-hidden rounded-full bg-stone-100">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{ width: `${pct}%`, background: row.color }}
+          />
         </div>
       </div>
-      <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.interested}</div>
-      <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.callScheduled}</div>
-      <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.won}</div>
-      <div className="text-right text-sm tabular-nums text-stone-500">{row.totalCalls}</div>
-      <div className="text-right text-base font-bold tabular-nums text-stone-900">{row.score}</div>
+
+      {/* ============ Desktop: Tabellen-Grid ============ */}
+      <div className="hidden sm:grid grid-cols-[60px_minmax(0,1fr)_repeat(4,minmax(0,80px))_minmax(80px,120px)] items-center gap-3 px-4 py-3 sm:gap-6 sm:px-6">
+        <div className="text-base font-semibold text-stone-500">{placeBadge}</div>
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            style={{ background: row.color }}
+          >
+            {initials(row.name)}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-stone-900">
+              {row.name}
+              {isMe && (
+                <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-700">
+                  Du
+                </span>
+              )}
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-stone-100">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${pct}%`, background: row.color }}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.interested}</div>
+        <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.callScheduled}</div>
+        <div className="text-right text-sm font-medium tabular-nums text-stone-700">{row.won}</div>
+        <div className="text-right text-sm tabular-nums text-stone-500">{row.totalCalls}</div>
+        <div className="text-right text-base font-bold tabular-nums text-stone-900">{row.score}</div>
+      </div>
     </div>
   );
 }

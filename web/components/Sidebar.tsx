@@ -14,8 +14,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "Suche", icon: <SearchIcon />, adminOnly: true },
   { href: "/lists", label: "Listen", icon: <ListIcon /> },
-  { href: "/leaderboard", label: "Leaderboard", icon: <TrophyIcon /> },
-  { href: "/settings", label: "Einstellungen", icon: <SettingsIcon />, adminOnly: true },
+  { href: "/leaderboard", label: "Ranking", icon: <TrophyIcon /> },
+  { href: "/settings", label: "Settings", icon: <SettingsIcon />, adminOnly: true },
 ];
 
 export default function Sidebar({ session }: { session: SessionInfo }) {
@@ -31,17 +31,54 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
   }
 
   return (
-    <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center gap-2 border-r border-stone-200 bg-white py-6 lg:w-60 lg:items-stretch lg:px-4">
-      <Link href={session.isAdmin ? "/" : "/lists"} className="mb-6 flex items-center gap-2 lg:px-2">
+    <>
+      <DesktopSidebar
+        items={items}
+        session={session}
+        pathname={pathname}
+        onLogout={logout}
+      />
+      <MobileBottomNav
+        items={items}
+        pathname={pathname}
+        onLogout={logout}
+      />
+      <MobileTopBar session={session} onLogout={logout} />
+    </>
+  );
+}
+
+// ===========================================================================
+// Desktop
+// ===========================================================================
+
+function DesktopSidebar({
+  items,
+  session,
+  pathname,
+  onLogout,
+}: {
+  items: NavItem[];
+  session: SessionInfo;
+  pathname: string;
+  onLogout: () => void;
+}) {
+  return (
+    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-stone-200 bg-white px-4 py-6 lg:flex">
+      <Link
+        href={session.isAdmin ? "/" : "/lists"}
+        className="mb-6 flex items-center gap-2 px-2"
+      >
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-900 text-lg font-semibold text-white">
           S
         </div>
-        <span className="hidden text-base font-semibold lg:inline">Soreax Leadscraper</span>
+        <span className="text-base font-semibold">Soreax Leadscraper</span>
       </Link>
 
       <nav className="flex flex-1 flex-col gap-1">
         {items.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const active =
+            item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
@@ -53,15 +90,15 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
               }`}
             >
               <span className="flex h-7 w-7 items-center justify-center">{item.icon}</span>
-              <span className="hidden lg:inline">{item.label}</span>
+              <span>{item.label === "Settings" ? "Einstellungen" : item.label === "Ranking" ? "Leaderboard" : item.label}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-2 lg:px-1">
+      <div className="mt-auto flex flex-col gap-2">
         {(session.setterName || session.isAdmin) && (
-          <div className="hidden items-center gap-2 rounded-2xl bg-stone-50 px-3 py-2 lg:flex">
+          <div className="flex items-center gap-2 rounded-2xl bg-stone-50 px-3 py-2">
             <div
               className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white"
               style={{ background: session.setterColor ?? "#525252" }}
@@ -79,17 +116,110 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
           </div>
         )}
         <button
-          onClick={logout}
-          className="flex items-center justify-center gap-2 rounded-full border border-stone-200 px-3 py-2 text-xs font-medium text-stone-600 hover:bg-stone-50 transition"
+          onClick={onLogout}
+          className="flex items-center justify-center gap-2 rounded-full border border-stone-200 px-3 py-2 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
           title="Abmelden"
         >
           <LogoutIcon />
-          <span className="hidden lg:inline">Abmelden</span>
+          <span>Abmelden</span>
         </button>
       </div>
     </aside>
   );
 }
+
+// ===========================================================================
+// Mobile – Bottom-Nav + Top-Bar
+// ===========================================================================
+
+function MobileBottomNav({
+  items,
+  pathname,
+  onLogout,
+}: {
+  items: NavItem[];
+  pathname: string;
+  onLogout: () => void;
+}) {
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-stone-200 bg-white/95 backdrop-blur-md shadow-[0_-1px_8px_rgba(0,0,0,0.04)] lg:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+    >
+      {items.map((item) => {
+        const active =
+          item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-medium transition ${
+              active ? "text-rose-600" : "text-stone-500"
+            }`}
+          >
+            <span
+              className={`flex h-9 w-9 items-center justify-center rounded-2xl transition ${
+                active ? "bg-rose-50" : ""
+              }`}
+            >
+              {item.icon}
+            </span>
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+      <button
+        onClick={onLogout}
+        className="flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-medium text-stone-500"
+        aria-label="Abmelden"
+      >
+        <span className="flex h-9 w-9 items-center justify-center">
+          <LogoutIcon />
+        </span>
+        <span>Abmelden</span>
+      </button>
+    </nav>
+  );
+}
+
+function MobileTopBar({
+  session,
+  onLogout: _onLogout,
+}: {
+  session: SessionInfo;
+  onLogout: () => void;
+}) {
+  return (
+    <header
+      className="sticky top-0 z-30 flex items-center justify-between border-b border-stone-200 bg-white/95 backdrop-blur-md px-4 py-2.5 lg:hidden"
+      style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.625rem)" }}
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-sm font-semibold text-white">
+          S
+        </div>
+        <span className="text-sm font-semibold tracking-tight">Soreax Leadscraper</span>
+      </div>
+      {(session.setterName || session.isAdmin) && (
+        <div className="flex items-center gap-2 rounded-full bg-stone-50 px-2 py-1">
+          <div
+            className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+            style={{ background: session.setterColor ?? "#525252" }}
+          >
+            {session.setterName ? initials(session.setterName) : "AD"}
+          </div>
+          <span className="text-xs font-medium text-stone-700">
+            {session.setterName ?? "Admin"}
+          </span>
+        </div>
+      )}
+    </header>
+  );
+}
+
+// ===========================================================================
+// Helpers + Icons
+// ===========================================================================
 
 function initials(name: string): string {
   return name
@@ -144,7 +274,7 @@ function SettingsIcon() {
 
 function LogoutIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />

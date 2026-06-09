@@ -21,6 +21,9 @@ const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ??
 
 declare global {
   var __pg: ReturnType<typeof postgres> | undefined;
+  // Schema-Init wird über Container-Warm-Lifetime gecached. Promise statt boolean,
+  // damit parallele Requests den Init nicht doppelt anstoßen.
+  var __schemaReady: Promise<void> | undefined;
 }
 
 const sql =
@@ -32,95 +35,111 @@ const sql =
   });
 
 if (process.env.NODE_ENV !== "production") globalThis.__pg = sql;
+// Auch in Production cachen, damit Schema-Init pro Warm-Container nur 1× läuft.
+if (!globalThis.__pg) globalThis.__pg = sql;
 
-let initialized = false;
+/**
+ * Schema in 3 parallelen Wellen aufsetzen statt 16 sequentiell:
+ *   Welle 1: alle CREATE TABLEs ohne FK-Abhängigkeit untereinander
+ *   Welle 2: lead_events (refs setters), alle ALTER TABLE leads ADD COLUMN, Default-List
+ *   Welle 3: ALTER TABLE leads ADD last_setter_id (refs setters), Indizes, Backfill
+ *
+ * Spart 10–15 DB-Roundtrips pro Cold Start.
+ */
+async function runSchema(): Promise<void> {
+  // Welle 1
+  await Promise.all([
+    sql`
+      CREATE TABLE IF NOT EXISTS lists (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `,
+    sql`
+      CREATE TABLE IF NOT EXISTS leads (
+        uid TEXT PRIMARY KEY,
+        source TEXT,
+        firmenname TEXT,
+        telefon TEXT,
+        adresse TEXT,
+        webseite TEXT,
+        email TEXT,
+        bewertung TEXT,
+        anzahl_reviews INTEGER,
+        google_maps TEXT,
+        oeffnungszeiten TEXT,
+        kategorie TEXT,
+        status TEXT,
+        ort TEXT,
+        dienstleistung TEXT,
+        first_seen TIMESTAMPTZ DEFAULT NOW(),
+        last_seen TIMESTAMPTZ DEFAULT NOW(),
+        contacted BOOLEAN DEFAULT FALSE
+      )
+    `,
+    sql`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        provider TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `,
+    sql`
+      CREATE TABLE IF NOT EXISTS setters (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        pin TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#e11d48',
+        is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `,
+  ]);
 
-async function ensureSchema(): Promise<void> {
-  if (initialized) return;
+  // Welle 2 – braucht lists + leads + setters aus Welle 1
+  await Promise.all([
+    sql`INSERT INTO lists (name) VALUES ('Inbox') ON CONFLICT DO NOTHING`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS list_id INTEGER REFERENCES lists(id) ON DELETE CASCADE`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_status TEXT DEFAULT 'new'`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contact TIMESTAMPTZ`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_action_at TIMESTAMPTZ`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
+    sql`
+      CREATE TABLE IF NOT EXISTS lead_events (
+        id SERIAL PRIMARY KEY,
+        lead_uid TEXT NOT NULL,
+        setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `,
+  ]);
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS lists (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
+  // Welle 3 – Indizes + Backfill
+  await Promise.all([
+    sql`CREATE INDEX IF NOT EXISTS idx_lead_events_ts ON lead_events (ts DESC)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_lead_events_setter ON lead_events (setter_id, ts DESC)`,
+    sql`
+      UPDATE leads
+      SET list_id = (SELECT id FROM lists WHERE name = 'Inbox')
+      WHERE list_id IS NULL
+    `,
+  ]);
+}
 
-  await sql`INSERT INTO lists (name) VALUES ('Inbox') ON CONFLICT DO NOTHING`;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS leads (
-      uid TEXT PRIMARY KEY,
-      source TEXT,
-      firmenname TEXT,
-      telefon TEXT,
-      adresse TEXT,
-      webseite TEXT,
-      email TEXT,
-      bewertung TEXT,
-      anzahl_reviews INTEGER,
-      google_maps TEXT,
-      oeffnungszeiten TEXT,
-      kategorie TEXT,
-      status TEXT,
-      ort TEXT,
-      dienstleistung TEXT,
-      first_seen TIMESTAMPTZ DEFAULT NOW(),
-      last_seen TIMESTAMPTZ DEFAULT NOW(),
-      contacted BOOLEAN DEFAULT FALSE
-    )
-  `;
-
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS list_id INTEGER REFERENCES lists(id) ON DELETE CASCADE`;
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_status TEXT DEFAULT 'new'`;
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''`;
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contact TIMESTAMPTZ`;
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0`;
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_action_at TIMESTAMPTZ`;
-
-  await sql`
-    UPDATE leads
-    SET list_id = (SELECT id FROM lists WHERE name = 'Inbox')
-    WHERE list_id IS NULL
-  `;
-
-  await sql`
-    CREATE TABLE IF NOT EXISTS api_keys (
-      provider TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-
-  // Setter (Team-Mitglieder) – Login per Name + PIN
-  await sql`
-    CREATE TABLE IF NOT EXISTS setters (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      pin TEXT NOT NULL,
-      color TEXT NOT NULL DEFAULT '#e11d48',
-      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-
-  // Audit-Log: jede Status-Bewegung wird einem Setter zugeordnet
-  await sql`
-    CREATE TABLE IF NOT EXISTS lead_events (
-      id SERIAL PRIMARY KEY,
-      lead_uid TEXT NOT NULL,
-      setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL,
-      from_status TEXT,
-      to_status TEXT NOT NULL,
-      ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS idx_lead_events_ts ON lead_events (ts DESC)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_lead_events_setter ON lead_events (setter_id, ts DESC)`;
-
-  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`;
-
-  initialized = true;
+function ensureSchema(): Promise<void> {
+  if (!globalThis.__schemaReady) {
+    globalThis.__schemaReady = runSchema().catch((err) => {
+      // Wenn Init fehlschlägt, Cache invalidieren damit der nächste Request es nochmal probiert
+      globalThis.__schemaReady = undefined;
+      throw err;
+    });
+  }
+  return globalThis.__schemaReady;
 }
 
 // =============================================================================

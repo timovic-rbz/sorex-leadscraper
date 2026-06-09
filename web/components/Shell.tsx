@@ -17,9 +17,10 @@ export default function Shell({
   if (isLogin) return <main className="min-h-screen">{children}</main>;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen flex-col lg:flex-row">
       <Sidebar session={session} />
-      <main className="flex-1 overflow-x-hidden">{children}</main>
+      {/* pb-24 schafft Platz für die fixe Bottom-Nav auf mobile (60px Nav + Safe-Area) */}
+      <main className="flex-1 overflow-x-hidden pb-24 lg:pb-0">{children}</main>
     </div>
   );
 }
