@@ -11,6 +11,27 @@ import {
   type List,
 } from "@/lib/types";
 
+const HIDDEN_STATUSES_KEY = "lead-board:hidden-statuses";
+
+function loadHidden(): Set<LeadStatus> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(HIDDEN_STATUSES_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as LeadStatus[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHidden(hidden: Set<LeadStatus>) {
+  try {
+    localStorage.setItem(HIDDEN_STATUSES_KEY, JSON.stringify([...hidden]));
+  } catch {
+    /* localStorage voll oder disabled — egal */
+  }
+}
+
 interface ListResponse {
   list: List;
   leads: DbLead[];
@@ -21,6 +42,21 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openLead, setOpenLead] = useState<DbLead | null>(null);
+  const [hidden, setHidden] = useState<Set<LeadStatus>>(() => new Set());
+
+  useEffect(() => {
+    setHidden(loadHidden());
+  }, []);
+
+  function toggleHidden(s: LeadStatus) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      saveHidden(next);
+      return next;
+    });
+  }
 
   async function reload() {
     try {
@@ -60,45 +96,114 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   if (!data) return <div className="p-6"><p className="text-stone-500">Lade...</p></div>;
 
   return (
-    <div className="mx-auto max-w-[1700px] p-4 lg:p-6">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="mx-auto max-w-[1900px] p-4 lg:p-6">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link href="/lists" className="rounded-full bg-white border border-stone-200 px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-50">
             ← Listen
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">{data.list.name}</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{data.list.name}</h1>
           <span className="pill bg-stone-50">{data.leads.length} Leads</span>
         </div>
         <Link href="/" className="btn-ghost h-9">+ Mehr Leads suchen</Link>
       </header>
 
-      {/* Kanban */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
-        {LEAD_STATUS_ORDER.map((status) => {
-          const meta = LEAD_STATUS_META[status];
-          const leads = grouped[status];
+      {/* Status-Filter-Leiste: aktive Status sind sichtbar, ausgegraute kollabieren */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-stone-500">Anzeigen:</span>
+        {LEAD_STATUS_ORDER.map((s) => {
+          const meta = LEAD_STATUS_META[s];
+          const count = grouped[s].length;
+          const isHidden = hidden.has(s);
           return (
-            <div key={status} className="flex flex-col rounded-2xl bg-white border border-stone-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2.5">
-                <div className="flex items-center gap-2 text-sm font-semibold text-stone-700">
+            <button
+              key={s}
+              onClick={() => toggleHidden(s)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition ${
+                isHidden
+                  ? "border-stone-200 bg-white text-stone-400 hover:text-stone-700"
+                  : "border-transparent text-white shadow-sm " + meta.color
+              }`}
+              title={isHidden ? `${meta.label} einblenden` : `${meta.label} ausblenden`}
+            >
+              <span>{meta.emoji}</span>
+              <span>{meta.label}</span>
+              <span
+                className={`rounded-full px-1.5 text-[10px] tabular-nums ${
+                  isHidden ? "bg-stone-100" : "bg-white/25"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Kanban – horizontal scrollbar mit min-Width pro Spalte */}
+      <div className="-mx-4 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0">
+        <div className="flex gap-3 min-w-fit">
+          {LEAD_STATUS_ORDER.map((status) => {
+            const meta = LEAD_STATUS_META[status];
+            const leads = grouped[status];
+            const isHidden = hidden.has(status);
+            const isEmpty = leads.length === 0;
+
+            // Versteckt → schmaler Streifen mit vertikalem Label, klick zum Aufklappen
+            if (isHidden) {
+              return (
+                <button
+                  key={status}
+                  onClick={() => toggleHidden(status)}
+                  className="flex w-10 shrink-0 flex-col items-center gap-2 rounded-2xl border border-stone-200 bg-stone-50/60 py-3 text-xs text-stone-500 transition hover:bg-stone-100"
+                  title="Einblenden"
+                >
                   <span className={`flex h-6 w-6 items-center justify-center rounded-full ${meta.color} text-white text-xs`}>
                     {meta.emoji}
                   </span>
-                  <span className="truncate">{meta.label}</span>
+                  <span className="rounded-full bg-stone-100 px-1.5 py-0.5 tabular-nums">
+                    {leads.length}
+                  </span>
+                  <span
+                    className="mt-1 whitespace-nowrap text-stone-400"
+                    style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+                  >
+                    {meta.label}
+                  </span>
+                </button>
+              );
+            }
+
+            return (
+              <div
+                key={status}
+                className={`flex w-72 shrink-0 flex-col rounded-2xl border border-stone-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:w-80 ${
+                  isEmpty ? "bg-stone-50/40" : "bg-white"
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2.5">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-stone-700">
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full ${meta.color} text-white text-xs`}>
+                      {meta.emoji}
+                    </span>
+                    <span className="truncate">{meta.label}</span>
+                  </div>
+                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                    {leads.length}
+                  </span>
                 </div>
-                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
-                  {leads.length}
-                </span>
+                <div className="flex max-h-[72vh] flex-col gap-2 overflow-y-auto p-2">
+                  {isEmpty && (
+                    <p className="px-2 py-6 text-center text-xs text-stone-400">noch leer</p>
+                  )}
+                  {leads.map((l) => (
+                    <LeadCard key={l.uid} lead={l} onClick={() => setOpenLead(l)} />
+                  ))}
+                </div>
               </div>
-              <div className="flex max-h-[72vh] flex-col gap-2 overflow-y-auto p-2">
-                {leads.length === 0 && <p className="px-2 py-6 text-center text-xs text-stone-400">leer</p>}
-                {leads.map((l) => (
-                  <LeadCard key={l.uid} lead={l} onClick={() => setOpenLead(l)} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {openLead && (
@@ -123,39 +228,59 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
       onClick={onClick}
       className="rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="font-medium text-stone-900">{lead.firmenname}</div>
-        {noWebsite && (
-          <span
-            title="Kein Webauftritt"
-            className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
-          >
-            🌐✗ Keine Website
-          </span>
-        )}
+      {/* Name – darf 2 Zeilen brauchen, danach Ellipsis */}
+      <div className="line-clamp-2 font-semibold leading-snug text-stone-900">
+        {lead.firmenname}
       </div>
+
+      {/* Telefon: ganze Zeile, Whitespace nicht brechen */}
       {lead.telefon && (
-        <div className="mt-2 flex items-center gap-1.5 text-base font-semibold text-rose-600">
-          <PhoneIcon /> {lead.telefon}
+        <div className="mt-2 flex items-center gap-1.5 text-rose-600">
+          <PhoneIcon />
+          <span className="whitespace-nowrap text-[15px] font-semibold tabular-nums">
+            {lead.telefon}
+          </span>
         </div>
       )}
-      {today && (
-        <div
-          className={`mt-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-            today.closed ? "bg-stone-100 text-stone-500" : "bg-emerald-50 text-emerald-700"
-          }`}
-        >
-          <span>🕒</span>
-          <span>Heute: {today.label}</span>
+
+      {/* Inline-Chips: Öffnungszeiten heute + "keine Website" */}
+      {(today || noWebsite) && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {today && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                today.closed ? "bg-stone-100 text-stone-500" : "bg-emerald-50 text-emerald-700"
+              }`}
+            >
+              🕒 {today.label}
+            </span>
+          )}
+          {noWebsite && (
+            <span
+              title="Kein Webauftritt"
+              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+            >
+              🌐✗ keine Website
+            </span>
+          )}
         </div>
       )}
-      {lead.adresse && <div className="mt-1.5 truncate text-xs text-stone-500">{lead.adresse}</div>}
-      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-stone-400">
-        <span>{lead.callCount > 0 ? `${lead.callCount}× angerufen` : "noch nicht versucht"}</span>
-        <span>{lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}</span>
+
+      {lead.adresse && (
+        <div className="mt-2 line-clamp-1 text-[11px] text-stone-500">{lead.adresse}</div>
+      )}
+
+      {/* Footer: Anruf-Status + Datum + Setter-Badge in einer Zeile */}
+      <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-stone-100 pt-2 text-[10px] text-stone-400">
+        <span className="truncate">
+          {lead.callCount > 0 ? `${lead.callCount}× angerufen` : "noch nicht versucht"}
+        </span>
+        <span className="shrink-0">
+          {lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}
+        </span>
       </div>
       {lead.lastSetterName && (
-        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
+        <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
           <span
             className="h-2 w-2 rounded-full"
             style={{ background: lead.lastSetterColor ?? "#525252" }}
