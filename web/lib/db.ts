@@ -67,6 +67,14 @@ async function runSchema(): Promise<void> {
       )
     `,
     sql`
+      CREATE TABLE IF NOT EXISTS geo_cache (
+        query TEXT PRIMARY KEY,
+        lat NUMERIC NOT NULL,
+        lng NUMERIC NOT NULL,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `,
+    sql`
       CREATE TABLE IF NOT EXISTS leads (
         uid TEXT PRIMARY KEY,
         source TEXT,
@@ -829,4 +837,76 @@ export async function dbUsageStats(): Promise<ProviderUsage[]> {
         costEur: Number(o.cost),
       })),
   }));
+}
+
+// =============================================================================
+// COVERAGE – welche Städte / Dienstleistungen wurden schon gescrapt
+// =============================================================================
+
+export interface CoverageRow {
+  ort: string;
+  dienstleistung: string;
+  total: number;
+  called: number;
+  touched: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+export async function dbCoverage(): Promise<CoverageRow[]> {
+  await ensureSchema();
+  const rows = await sql<
+    {
+      ort: string;
+      dienstleistung: string;
+      total: string;
+      called: string;
+      touched: string;
+      first_seen: string | null;
+      last_seen: string | null;
+    }[]
+  >`
+    SELECT
+      COALESCE(NULLIF(TRIM(ort), ''), '?') AS ort,
+      COALESCE(NULLIF(TRIM(dienstleistung), ''), '?') AS dienstleistung,
+      COUNT(*)::text                                       AS total,
+      COUNT(*) FILTER (WHERE call_count > 0)::text         AS called,
+      COUNT(*) FILTER (WHERE lead_status <> 'new')::text   AS touched,
+      MIN(first_seen)::text AS first_seen,
+      MAX(last_seen)::text  AS last_seen
+    FROM leads
+    GROUP BY 1, 2
+    ORDER BY COUNT(*) DESC, 1, 2
+  `;
+  return rows.map((r) => ({
+    ort: r.ort,
+    dienstleistung: r.dienstleistung,
+    total: Number(r.total),
+    called: Number(r.called),
+    touched: Number(r.touched),
+    firstSeen: r.first_seen,
+    lastSeen: r.last_seen,
+  }));
+}
+
+// =============================================================================
+// GEO-CACHE – Lat/Lng für Städte, einmal über Nominatim geholt
+// =============================================================================
+
+export async function dbGetCachedCoord(query: string): Promise<{ lat: number; lng: number } | null> {
+  await ensureSchema();
+  const rows = await sql<{ lat: string; lng: string }[]>`
+    SELECT lat::text, lng::text FROM geo_cache WHERE query = ${query.toLowerCase()}
+  `;
+  if (rows.length === 0) return null;
+  return { lat: Number(rows[0].lat), lng: Number(rows[0].lng) };
+}
+
+export async function dbSetCachedCoord(query: string, lat: number, lng: number): Promise<void> {
+  await ensureSchema();
+  await sql`
+    INSERT INTO geo_cache (query, lat, lng)
+    VALUES (${query.toLowerCase()}, ${lat}, ${lng})
+    ON CONFLICT (query) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng
+  `;
 }

@@ -8,12 +8,15 @@ const PUBLIC_PATHS = ["/login", "/api/login", "/api/logout", "/api/setters/publi
 const ADMIN_ONLY_EXACT = new Set(["/"]);
 const ADMIN_ONLY_PREFIXES = [
   "/settings",
+  "/coverage",
   "/api/search",
   "/api/crawl-emails",
   "/api/settings",
   "/api/setters", // CRUD (Public-Endpoint liegt unter /api/setters/public)
   "/api/admin-password",
   "/api/usage",
+  "/api/coverage",
+  "/api/geocode",
 ];
 
 function isAdminOnly(path: string): boolean {
