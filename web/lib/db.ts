@@ -71,6 +71,7 @@ async function runSchema(): Promise<void> {
         query TEXT PRIMARY KEY,
         lat NUMERIC NOT NULL,
         lng NUMERIC NOT NULL,
+        polygon TEXT,
         ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `,
@@ -117,6 +118,7 @@ async function runSchema(): Promise<void> {
 
   // Welle 2 – braucht lists + leads + setters aus Welle 1
   await Promise.all([
+    sql`ALTER TABLE geo_cache ADD COLUMN IF NOT EXISTS polygon TEXT`,
     sql`INSERT INTO lists (name) VALUES ('Inbox') ON CONFLICT DO NOTHING`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS list_id INTEGER REFERENCES lists(id) ON DELETE CASCADE`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_status TEXT DEFAULT 'new'`,
@@ -893,20 +895,34 @@ export async function dbCoverage(): Promise<CoverageRow[]> {
 // GEO-CACHE – Lat/Lng für Städte, einmal über Nominatim geholt
 // =============================================================================
 
-export async function dbGetCachedCoord(query: string): Promise<{ lat: number; lng: number } | null> {
+export async function dbGetCachedCoord(
+  query: string,
+): Promise<{ lat: number; lng: number; polygon: string | null } | null> {
   await ensureSchema();
-  const rows = await sql<{ lat: string; lng: string }[]>`
-    SELECT lat::text, lng::text FROM geo_cache WHERE query = ${query.toLowerCase()}
+  const rows = await sql<{ lat: string; lng: string; polygon: string | null }[]>`
+    SELECT lat::text, lng::text, polygon FROM geo_cache WHERE query = ${query.toLowerCase()}
   `;
   if (rows.length === 0) return null;
-  return { lat: Number(rows[0].lat), lng: Number(rows[0].lng) };
+  return {
+    lat: Number(rows[0].lat),
+    lng: Number(rows[0].lng),
+    polygon: rows[0].polygon,
+  };
 }
 
-export async function dbSetCachedCoord(query: string, lat: number, lng: number): Promise<void> {
+export async function dbSetCachedCoord(
+  query: string,
+  lat: number,
+  lng: number,
+  polygon: string | null = null,
+): Promise<void> {
   await ensureSchema();
   await sql`
-    INSERT INTO geo_cache (query, lat, lng)
-    VALUES (${query.toLowerCase()}, ${lat}, ${lng})
-    ON CONFLICT (query) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng
+    INSERT INTO geo_cache (query, lat, lng, polygon)
+    VALUES (${query.toLowerCase()}, ${lat}, ${lng}, ${polygon})
+    ON CONFLICT (query) DO UPDATE
+      SET lat     = EXCLUDED.lat,
+          lng     = EXCLUDED.lng,
+          polygon = COALESCE(EXCLUDED.polygon, geo_cache.polygon)
   `;
 }

@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  GeoJSON,
+  CircleMarker,
+  Tooltip,
+} from "react-leaflet";
+import type { Feature, GeoJsonObject } from "geojson";
 
 interface City {
   ort: string;
@@ -15,6 +22,7 @@ interface City {
 interface Marker extends City {
   lat: number;
   lng: number;
+  polygon: GeoJsonObject | null;
 }
 
 // NRW-Mitte ≈ Dortmund
@@ -34,17 +42,23 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
       const collected: Marker[] = [];
       const errors: string[] = [];
 
-      // Sequenziell + 1.1s Pause damit Nominatim glücklich bleibt (Rate-Limit).
-      // Cache-Hits gehen schneller (kein Nominatim-Call), daher fragt der
-      // Endpoint die DB-Cache zuerst — beim 2. Page-Load ist alles instant.
       for (let i = 0; i < cities.length; i++) {
         const city = cities[i];
         try {
           const r = await fetch(`/api/geocode?q=${encodeURIComponent(city.ort)}`);
           if (r.ok) {
-            const d = (await r.json()) as { lat: number; lng: number; cached?: boolean };
-            collected.push({ ...city, lat: d.lat, lng: d.lng });
-            // Nur bei Nominatim-Call warten, Cache-Hits brauchen kein Sleep
+            const d = (await r.json()) as {
+              lat: number;
+              lng: number;
+              polygon: GeoJsonObject | null;
+              cached?: boolean;
+            };
+            collected.push({
+              ...city,
+              lat: d.lat,
+              lng: d.lng,
+              polygon: d.polygon,
+            });
             if (!d.cached) await new Promise((res) => setTimeout(res, 1100));
           } else {
             errors.push(city.ort);
@@ -54,10 +68,11 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
         }
         if (!alive) return;
         setProgress({ done: i + 1, total: cities.length });
+        // Inkrementell anzeigen, damit man Fortschritt sieht
+        setMarkers([...collected]);
       }
 
       if (!alive) return;
-      setMarkers(collected);
       setFailed(errors);
       setProgress(null);
     })();
@@ -67,8 +82,6 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
     };
   }, [cities]);
 
-  const maxTotal = Math.max(1, ...markers.map((m) => m.total));
-
   return (
     <div className="space-y-3">
       {progress && (
@@ -76,7 +89,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
           <div className="animate-pulse text-lg">📍</div>
           <div className="flex-1">
             <div>
-              Geocoding {progress.done} / {progress.total} …
+              Stadtgrenzen laden {progress.done} / {progress.total} …
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-stone-100">
               <div
@@ -90,7 +103,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
 
       {failed.length > 0 && (
         <div className="card border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          ⚠ Keine Koordinaten gefunden für: {failed.join(", ")}
+          ⚠ Keine Daten für: {failed.join(", ")}
         </div>
       )}
 
@@ -107,33 +120,45 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
           />
           {markers.map((m) => {
             const calledPct = m.total > 0 ? m.called / m.total : 0;
-            const radius = scaleRadius(m.total, maxTotal);
             const color = colorForProgress(calledPct);
+            const opacity = fillOpacityFor(calledPct);
+
+            // Wenn Polygon da: gefärbte Stadt-Grenze. Sonst Fallback Circle.
+            if (m.polygon) {
+              return (
+                <GeoJSON
+                  key={`${m.ort}-${calledPct.toFixed(2)}`}
+                  data={m.polygon}
+                  style={() => ({
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: opacity,
+                    weight: 2,
+                  })}
+                  onEachFeature={(_: Feature, layer) => {
+                    layer.bindTooltip(
+                      tooltipHtml(m, calledPct),
+                      { direction: "top", sticky: true },
+                    );
+                  }}
+                />
+              );
+            }
+
             return (
               <CircleMarker
                 key={m.ort}
                 center={[m.lat, m.lng]}
-                radius={radius}
+                radius={12}
                 pathOptions={{
                   color: color,
                   fillColor: color,
-                  fillOpacity: 0.55,
+                  fillOpacity: opacity,
                   weight: 2,
                 }}
               >
-                <Tooltip direction="top" offset={[0, -radius]} sticky>
-                  <div className="text-sm">
-                    <div className="font-semibold">{m.ort}</div>
-                    <div>📋 {m.total} Leads</div>
-                    <div>
-                      📞 {m.called} angerufen ({Math.round(calledPct * 100)}%)
-                    </div>
-                    <div>✅ {m.touched} bearbeitet</div>
-                    <div className="text-xs text-stone-500">
-                      {m.services.slice(0, 5).join(", ")}
-                      {m.services.length > 5 && ` +${m.services.length - 5}`}
-                    </div>
-                  </div>
+                <Tooltip direction="top" sticky>
+                  <div dangerouslySetInnerHTML={{ __html: tooltipHtml(m, calledPct) }} />
                 </Tooltip>
               </CircleMarker>
             );
@@ -141,46 +166,86 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
         </MapContainer>
       </div>
 
-      {/* Legende */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-stone-500">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-stone-700">Größe:</span>
-          <div className="flex items-center gap-1">
-            <div className="h-2 w-2 rounded-full bg-stone-400" />
-            <div className="h-3 w-3 rounded-full bg-stone-400" />
-            <div className="h-4 w-4 rounded-full bg-stone-400" />
-          </div>
-          <span>= mehr Leads</span>
+      {/* Legende: Anrufquote-Farbverlauf */}
+      <div className="card flex flex-wrap items-center gap-3 p-3 text-xs text-stone-600">
+        <span className="font-medium text-stone-700">Anrufquote pro Stadt:</span>
+        <div className="flex items-center gap-1">
+          <LegendBox color="#fda4af" />
+          <span>0%</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-stone-700">Farbe:</span>
-          <div className="flex items-center gap-1">
-            <div className="h-3 w-3 rounded-full bg-rose-500" />
-            <span>noch nicht angerufen</span>
-            <div className="ml-3 h-3 w-3 rounded-full bg-amber-500" />
-            <span>angefangen</span>
-            <div className="ml-3 h-3 w-3 rounded-full bg-emerald-500" />
-            <span>fast komplett</span>
-          </div>
+        <div className="flex items-center gap-1">
+          <LegendBox color="#f43f5e" />
+          <span>25%</span>
         </div>
+        <div className="flex items-center gap-1">
+          <LegendBox color="#e11d48" />
+          <span>50%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <LegendBox color="#9f1239" />
+          <span>75%</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <LegendBox color="#4c0519" />
+          <span>100% ✓</span>
+        </div>
+        <span className="ml-auto text-stone-400">
+          Stadtgrenzen via OpenStreetMap
+        </span>
       </div>
     </div>
   );
 }
 
-function scaleRadius(value: number, max: number): number {
-  // Min 6, Max 28 — logarithmische Skala, damit große Städte nicht alles dominieren
-  const min = 6;
-  const cap = 28;
-  if (value <= 0) return min;
-  const norm = Math.log(1 + value) / Math.log(1 + max);
-  return min + norm * (cap - min);
+function LegendBox({ color }: { color: string }) {
+  return (
+    <span
+      className="inline-block h-4 w-4 rounded ring-1 ring-stone-300"
+      style={{ background: color, opacity: 0.8 }}
+    />
+  );
 }
 
+function tooltipHtml(m: Marker, pct: number): string {
+  // Wir bauen einen kleinen HTML-Block — Leaflet rendert das im Tooltip
+  const services = m.services.slice(0, 5).join(", ");
+  const more = m.services.length > 5 ? ` +${m.services.length - 5}` : "";
+  return `
+    <div style="font-size:12px;line-height:1.4">
+      <div style="font-weight:600;font-size:13px">${escapeHtml(m.ort)}</div>
+      <div>📋 ${m.total} Leads</div>
+      <div>📞 ${m.called} angerufen (${Math.round(pct * 100)}%)</div>
+      <div>✅ ${m.touched} bearbeitet</div>
+      <div style="color:#78716c;margin-top:4px">${escapeHtml(services)}${escapeHtml(more)}</div>
+    </div>
+  `;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Farbverlauf hellrot → dunkelrot anhand der Anrufquote.
+ * Nicht über continuous interpolate gehen — Tailwind-Stamm-Töne lesen sich besser.
+ */
 function colorForProgress(pct: number): string {
-  // 0% = rot, 50% = orange, 100% = grün
-  if (pct < 0.15) return "#e11d48"; // rose-600
-  if (pct < 0.5) return "#f59e0b"; // amber-500
-  if (pct < 0.85) return "#84cc16"; // lime-500
-  return "#10b981"; // emerald-500
+  // Hellrot (unangerührt) → dunkelrot (komplett durch). Bewusst kräftig
+  // ab Stufe 1 damit jede Stadt klar erkennbar ist.
+  if (pct < 0.05) return "#fda4af"; // rose-300 – fast unangerührt, aber sichtbar
+  if (pct < 0.25) return "#fb7185"; // rose-400
+  if (pct < 0.5) return "#f43f5e";  // rose-500
+  if (pct < 0.75) return "#e11d48"; // rose-600
+  if (pct < 1.0) return "#9f1239";  // rose-800
+  return "#4c0519";                  // rose-950 – komplett durch
+}
+
+function fillOpacityFor(pct: number): number {
+  // 0%: 0.50 – Stadt klar erkennbar
+  // 100%: 0.85 – kräftig gefüllt
+  return 0.5 + pct * 0.35;
 }
