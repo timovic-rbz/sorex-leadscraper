@@ -13,6 +13,7 @@ const ADMIN_ONLY_PREFIXES = [
   "/api/settings",
   "/api/setters", // CRUD (Public-Endpoint liegt unter /api/setters/public)
   "/api/admin-password",
+  "/api/usage",
 ];
 
 function isAdminOnly(path: string): boolean {

@@ -55,6 +55,15 @@ export default function SettingsPage() {
         </div>
       )}
 
+      <section className="mb-12 space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">📊 Verbrauch</h2>
+        <p className="text-sm text-stone-500">
+          Externe API-Calls + geschätzte Kosten. Wird automatisch mitgeloggt sobald eine Suche
+          läuft — keine externe Abrechnung, nur lokale Schätzung auf Listenpreis-Basis.
+        </p>
+        <UsageSection />
+      </section>
+
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">API-Keys</h2>
         {providers === null && <p className="text-sm text-stone-500">Lade...</p>}
@@ -83,6 +92,181 @@ export default function SettingsPage() {
       </section>
     </div>
   );
+}
+
+// ============================================================================
+// Verbrauchs-Sektion
+// ============================================================================
+
+interface UsageWindow {
+  units: number;
+  costEur: number;
+  calls: number;
+}
+
+interface ProviderUsage {
+  provider: string;
+  today: UsageWindow;
+  week: UsageWindow;
+  month: UsageWindow;
+  total: UsageWindow;
+  operations: Array<{ operation: string; calls: number; units: number; costEur: number }>;
+}
+
+const PROVIDER_META: Record<string, { name: string; unit: string; icon: string }> = {
+  google_places: { name: "Google Places", unit: "Adressen", icon: "🗺️" },
+  anthropic: { name: "Anthropic (Claude)", unit: "Tokens", icon: "🤖" },
+  openai: { name: "OpenAI (GPT)", unit: "Tokens", icon: "💬" },
+};
+
+function UsageSection() {
+  const [usage, setUsage] = useState<ProviderUsage[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/usage")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = (await r.json()) as { usage: ProviderUsage[] };
+        setUsage(d.usage);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  if (error) {
+    return (
+      <div className="card border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        ❌ {error}
+      </div>
+    );
+  }
+
+  if (usage === null) {
+    return <p className="text-sm text-stone-500">Lade...</p>;
+  }
+
+  if (usage.length === 0) {
+    return (
+      <div className="card flex flex-col items-center gap-3 p-8 text-center">
+        <div className="text-4xl">📈</div>
+        <p className="text-sm text-stone-600">
+          Noch keine API-Calls protokolliert. Sobald du die erste Suche startest, taucht's hier auf.
+        </p>
+      </div>
+    );
+  }
+
+  // Team-Gesamt-Banner
+  const monthTotalEur = usage.reduce((acc, u) => acc + u.month.costEur, 0);
+  const monthTotalCalls = usage.reduce((acc, u) => acc + u.month.calls, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-rose-50 to-amber-50 p-5">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+            Letzte 30 Tage · alle Provider
+          </div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-stone-900">
+            {formatEur(monthTotalEur)}
+          </div>
+          <div className="mt-1 text-xs text-stone-500">{monthTotalCalls} API-Calls</div>
+        </div>
+        <div className="text-right text-xs text-stone-500">
+          Geschätzt auf Listenpreis<br />
+          (Google: $32/1000 Text Search,<br />
+          AI: aktuelle Token-Preise)
+        </div>
+      </div>
+
+      {usage.map((u) => (
+        <UsageCard key={u.provider} usage={u} />
+      ))}
+    </div>
+  );
+}
+
+function UsageCard({ usage }: { usage: ProviderUsage }) {
+  const meta = PROVIDER_META[usage.provider] ?? {
+    name: usage.provider,
+    unit: "Einheiten",
+    icon: "📊",
+  };
+
+  return (
+    <div className="card p-5">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-stone-50 text-xl">
+          {meta.icon}
+        </div>
+        <div>
+          <h3 className="text-base font-semibold">{meta.name}</h3>
+          <p className="text-xs text-stone-500">{meta.unit}</p>
+        </div>
+        <div className="ml-auto text-right">
+          <div className="text-lg font-bold tabular-nums">{formatEur(usage.total.costEur)}</div>
+          <div className="text-[10px] uppercase tracking-wider text-stone-500">All-time</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <WindowStat label="Heute" w={usage.today} unit={meta.unit} />
+        <WindowStat label="Letzte 7 Tage" w={usage.week} unit={meta.unit} />
+        <WindowStat label="Letzte 30 Tage" w={usage.month} unit={meta.unit} />
+        <WindowStat label="All-time" w={usage.total} unit={meta.unit} />
+      </div>
+
+      {usage.operations.length > 0 && (
+        <details className="mt-4 group">
+          <summary className="cursor-pointer text-xs font-medium text-stone-500 hover:text-stone-700">
+            Aufschlüsselung nach Operation ({usage.operations.length})
+          </summary>
+          <div className="mt-3 space-y-1 rounded-lg bg-stone-50 p-3">
+            {usage.operations.map((op) => (
+              <div
+                key={op.operation}
+                className="flex items-center justify-between text-xs text-stone-600"
+              >
+                <span className="font-mono">{op.operation}</span>
+                <span>
+                  <span className="tabular-nums">{op.calls}</span>× ·{" "}
+                  <span className="tabular-nums">{op.units}</span> {meta.unit} ·{" "}
+                  <span className="font-semibold tabular-nums">{formatEur(op.costEur)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function WindowStat({ label, w, unit }: { label: string; w: UsageWindow; unit: string }) {
+  return (
+    <div className="rounded-xl bg-stone-50 p-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-bold tabular-nums text-stone-900">
+        {formatEur(w.costEur)}
+      </div>
+      <div className="mt-0.5 text-[10px] text-stone-500">
+        {w.calls}× · {w.units.toLocaleString("de-DE")} {unit}
+      </div>
+    </div>
+  );
+}
+
+function formatEur(eur: number): string {
+  // Bei sehr kleinen Beträgen Cent anzeigen statt 0.00€
+  if (eur > 0 && eur < 0.01) return "< 1ct";
+  return eur.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function AdminPasswordSection() {

@@ -57,6 +57,16 @@ async function runSchema(): Promise<void> {
       )
     `,
     sql`
+      CREATE TABLE IF NOT EXISTS api_usage (
+        id SERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        units NUMERIC NOT NULL DEFAULT 0,
+        cost_eur NUMERIC NOT NULL DEFAULT 0,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `,
+    sql`
       CREATE TABLE IF NOT EXISTS leads (
         uid TEXT PRIMARY KEY,
         source TEXT,
@@ -123,6 +133,8 @@ async function runSchema(): Promise<void> {
   await Promise.all([
     sql`CREATE INDEX IF NOT EXISTS idx_lead_events_ts ON lead_events (ts DESC)`,
     sql`CREATE INDEX IF NOT EXISTS idx_lead_events_setter ON lead_events (setter_id, ts DESC)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_api_usage_ts ON api_usage (ts DESC)`,
+    sql`CREATE INDEX IF NOT EXISTS idx_api_usage_provider_ts ON api_usage (provider, ts DESC)`,
     sql`
       UPDATE leads
       SET list_id = (SELECT id FROM lists WHERE name = 'Inbox')
@@ -698,5 +710,123 @@ export async function dbLeaderboard(sinceIso: string | null): Promise<Leaderboar
     won: Number(r.won),
     totalSet: Number(r.interested) + Number(r.call_scheduled),
     totalCalls: Number(r.total_calls),
+  }));
+}
+
+// =============================================================================
+// API-USAGE – Verbrauchs-Tracking pro Provider
+// =============================================================================
+
+/**
+ * Schreibt eine Usage-Zeile. Fehler werden nur geloggt, nie geworfen — Tracking
+ * darf eine echte Suche nicht zum Crashen bringen.
+ */
+export async function dbRecordUsage(
+  provider: string,
+  operation: string,
+  units: number,
+  costEur: number,
+): Promise<void> {
+  try {
+    await ensureSchema();
+    await sql`
+      INSERT INTO api_usage (provider, operation, units, cost_eur)
+      VALUES (${provider}, ${operation}, ${units}, ${costEur})
+    `;
+  } catch (e) {
+    console.error("[usage] insert failed", e);
+  }
+}
+
+export interface UsageWindow {
+  units: number;
+  costEur: number;
+  calls: number;
+}
+
+export interface ProviderUsage {
+  provider: string;
+  today: UsageWindow;
+  week: UsageWindow;
+  month: UsageWindow;
+  total: UsageWindow;
+  operations: Array<{ operation: string; calls: number; units: number; costEur: number }>;
+}
+
+/** Aggregiert nach Provider × Zeitfenster (heute / 7d / 30d / all-time). */
+export async function dbUsageStats(): Promise<ProviderUsage[]> {
+  await ensureSchema();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = today.toISOString();
+  const weekIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const monthIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const rows = await sql<
+    {
+      provider: string;
+      today_units: string;
+      today_cost: string;
+      today_calls: string;
+      week_units: string;
+      week_cost: string;
+      week_calls: string;
+      month_units: string;
+      month_cost: string;
+      month_calls: string;
+      total_units: string;
+      total_cost: string;
+      total_calls: string;
+    }[]
+  >`
+    SELECT
+      provider,
+      COALESCE(SUM(units)    FILTER (WHERE ts >= ${todayIso}), 0)::text AS today_units,
+      COALESCE(SUM(cost_eur) FILTER (WHERE ts >= ${todayIso}), 0)::text AS today_cost,
+      COALESCE(COUNT(*)      FILTER (WHERE ts >= ${todayIso}), 0)::text AS today_calls,
+      COALESCE(SUM(units)    FILTER (WHERE ts >= ${weekIso}),  0)::text AS week_units,
+      COALESCE(SUM(cost_eur) FILTER (WHERE ts >= ${weekIso}),  0)::text AS week_cost,
+      COALESCE(COUNT(*)      FILTER (WHERE ts >= ${weekIso}),  0)::text AS week_calls,
+      COALESCE(SUM(units)    FILTER (WHERE ts >= ${monthIso}), 0)::text AS month_units,
+      COALESCE(SUM(cost_eur) FILTER (WHERE ts >= ${monthIso}), 0)::text AS month_cost,
+      COALESCE(COUNT(*)      FILTER (WHERE ts >= ${monthIso}), 0)::text AS month_calls,
+      COALESCE(SUM(units),    0)::text AS total_units,
+      COALESCE(SUM(cost_eur), 0)::text AS total_cost,
+      COALESCE(COUNT(*),      0)::text AS total_calls
+    FROM api_usage
+    GROUP BY provider
+    ORDER BY provider
+  `;
+
+  // Pro Provider auch die Operation-Aufschlüsselung holen (kompakt, all-time).
+  const opRows = await sql<
+    { provider: string; operation: string; calls: string; units: string; cost: string }[]
+  >`
+    SELECT
+      provider,
+      operation,
+      COUNT(*)::text     AS calls,
+      SUM(units)::text   AS units,
+      SUM(cost_eur)::text AS cost
+    FROM api_usage
+    GROUP BY provider, operation
+    ORDER BY provider, SUM(cost_eur) DESC
+  `;
+
+  return rows.map((r) => ({
+    provider: r.provider,
+    today: { units: Number(r.today_units), costEur: Number(r.today_cost), calls: Number(r.today_calls) },
+    week:  { units: Number(r.week_units),  costEur: Number(r.week_cost),  calls: Number(r.week_calls) },
+    month: { units: Number(r.month_units), costEur: Number(r.month_cost), calls: Number(r.month_calls) },
+    total: { units: Number(r.total_units), costEur: Number(r.total_cost), calls: Number(r.total_calls) },
+    operations: opRows
+      .filter((o) => o.provider === r.provider)
+      .map((o) => ({
+        operation: o.operation,
+        calls: Number(o.calls),
+        units: Number(o.units),
+        costEur: Number(o.cost),
+      })),
   }));
 }

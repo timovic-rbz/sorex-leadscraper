@@ -1,5 +1,6 @@
 import type { Lead } from "./types";
 import { getApiKey } from "./api-keys";
+import { recordGooglePlacesTextSearch } from "./usage";
 
 const SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const FIELDS = [
@@ -81,7 +82,12 @@ export async function searchGoogle(
     }
 
     const data = (await r.json()) as { places?: GooglePlace[]; nextPageToken?: string };
-    places.push(...(data.places ?? []));
+    const batch = data.places ?? [];
+    places.push(...batch);
+    // Verbrauch protokollieren — Google rechnet PRO Call ab, egal wieviele Places drin sind.
+    // Wir loggen trotzdem die Anzahl Adressen als "units", damit man im Dashboard
+    // sieht "X Places geholt für Y Cent".
+    void recordGooglePlacesTextSearch(batch.length);
     pageToken = data.nextPageToken;
     if (!pageToken) break;
     await new Promise((res) => setTimeout(res, 2000)); // Token braucht ~2s bis er aktiv wird
