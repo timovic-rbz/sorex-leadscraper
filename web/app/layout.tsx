@@ -5,7 +5,7 @@ import { getSessionInfo } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Lead Scraper",
-  description: "OSM + Google Places + Cold-Calling-CRM",
+  description: "Google Places + Cold-Calling-CRM",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

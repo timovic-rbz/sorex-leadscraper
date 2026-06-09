@@ -167,7 +167,10 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 
 // ---------- main page ----------
 export default function Page() {
-  const [source, setSource] = useState<Source>("osm");
+  // Quelle fix auf Google Places — OSM-Toggle wurde entfernt (Rate-Limit-Frust,
+  // bei zu vielen 429/504). Die Source-Prop bleibt im DB-Schema + APIs erhalten,
+  // damit alte Leads weiterhin "source=osm" sein dürfen.
+  const source: Source = "google";
   const [scrapeEmails, setScrapeEmails] = useState(true);
   const [tab, setTab] = useState<TabId>("single");
 
@@ -179,18 +182,13 @@ export default function Page() {
           <p className="mt-2 text-sm text-stone-500">Daten ziehen, in eine Liste speichern, dann unter <a href="/lists" className="text-rose-600 hover:underline">Listen</a> abarbeiten.</p>
         </div>
         <div className="hidden gap-2 sm:flex">
-          <span className="pill">{source === "osm" ? "🌍 OSM" : "🔵 Google"}</span>
+          <span className="pill">🔵 Google Places</span>
           <span className="pill">{scrapeEmails ? "📧 E-Mail an" : "📧 E-Mail aus"}</span>
         </div>
       </header>
 
       <section className="card mb-6 flex flex-wrap items-center gap-4 px-5 py-4">
-        <span className="text-sm font-medium text-stone-600">Quelle</span>
-        <div className="flex gap-1 rounded-full bg-stone-100 p-1">
-          <Toggle active={source === "osm"} onClick={() => setSource("osm")}>🌍 OpenStreetMap</Toggle>
-          <Toggle active={source === "google"} onClick={() => setSource("google")}>🔵 Google Places</Toggle>
-        </div>
-        <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" checked={scrapeEmails} onChange={(e) => setScrapeEmails(e.target.checked)} className="h-4 w-4 accent-rose-600" />
           <span>E-Mails von Webseiten crawlen</span>
         </label>
@@ -204,19 +202,6 @@ export default function Page() {
       {tab === "single" && <SingleTab source={source} scrapeEmails={scrapeEmails} />}
       {tab === "bulk" && <BulkTab source={source} scrapeEmails={scrapeEmails} />}
     </div>
-  );
-}
-
-function Toggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-        active ? "bg-white text-neutral-900 shadow-sm" : "text-stone-500 hover:text-stone-800"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
