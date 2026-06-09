@@ -2,20 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { LEAD_STATUS_META, LEAD_STATUS_ORDER, type ListWithStats, type SessionInfo } from "@/lib/types";
+import { LEAD_STATUS_META, LEAD_STATUS_ORDER, type ListWithStats } from "@/lib/types";
+import { useSession } from "@/lib/session-context";
 
 export default function ListsPage() {
   const [lists, setLists] = useState<ListWithStats[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [me, setMe] = useState<SessionInfo | null>(null);
-
-  useEffect(() => {
-    fetch("/api/me")
-      .then((r) => r.json())
-      .then((d: SessionInfo) => setMe(d))
-      .catch(() => setMe(null));
-  }, []);
+  const me = useSession();
 
   useEffect(() => {
     let alive = true;
@@ -80,7 +74,7 @@ export default function ListsPage() {
             {lists.length} {lists.length === 1 ? "Liste" : "Listen"} · {totalLeads} Leads insgesamt
           </p>
         </div>
-        {me?.isAdmin && <Link href="/" className="btn-primary">+ Neue Suche</Link>}
+        {me.isAdmin && <Link href="/" className="btn-primary">+ Neue Suche</Link>}
       </header>
 
       {lists.length === 0 ? (

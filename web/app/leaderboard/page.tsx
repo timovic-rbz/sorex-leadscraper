@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { LeaderboardRow, SessionInfo } from "@/lib/types";
+import type { LeaderboardRow } from "@/lib/types";
+import { useSession } from "@/lib/session-context";
 
 type Win = "today" | "7d" | "30d" | "all";
 
@@ -17,9 +18,9 @@ interface Scored extends LeaderboardRow {
 }
 
 export default function LeaderboardPage() {
+  const me = useSession();
   const [win, setWin] = useState<Win>("7d");
   const [rows, setRows] = useState<LeaderboardRow[] | null>(null);
-  const [me, setMe] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<number>(0);
 
@@ -27,13 +28,6 @@ export default function LeaderboardPage() {
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/me")
-      .then((r) => r.json())
-      .then((d: SessionInfo) => setMe(d))
-      .catch(() => setMe(null));
   }, []);
 
   useEffect(() => {
