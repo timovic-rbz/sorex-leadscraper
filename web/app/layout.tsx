@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import Shell from "@/components/Shell";
+import { getSessionInfo } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Lead Scraper",
   description: "OSM + Google Places + Cold-Calling-CRM",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getSessionInfo();
+
   return (
     <html lang="de">
       <body className="min-h-screen">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 overflow-x-hidden">{children}</main>
-        </div>
+        <Shell session={session}>{children}</Shell>
       </body>
     </html>
   );

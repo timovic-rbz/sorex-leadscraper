@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { Setter } from "@/lib/types";
 
 interface ProviderEntry {
   id: string;
@@ -14,6 +15,11 @@ interface ProviderEntry {
   masked: string | null;
   updatedAt: string | null;
 }
+
+const COLOR_PALETTE = [
+  "#e11d48", "#f97316", "#eab308", "#22c55e",
+  "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+];
 
 export default function SettingsPage() {
   const [providers, setProviders] = useState<ProviderEntry[] | null>(null);
@@ -56,6 +62,283 @@ export default function SettingsPage() {
           <ProviderCard key={p.id} provider={p} onChange={reload} />
         ))}
       </section>
+
+      <section className="mt-12 space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Team (Setter)</h2>
+        <p className="text-sm text-stone-500">
+          Wer darf sich einloggen und Leads bearbeiten? Setter sehen nur Listen + Leaderboard.
+          Admins dürfen zusätzlich scrapen, das Team verwalten und Einstellungen ändern.
+        </p>
+        <TeamSection />
+      </section>
+    </div>
+  );
+}
+
+function TeamSection() {
+  const [setters, setSetters] = useState<Setter[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  async function reload() {
+    try {
+      const r = await fetch("/api/setters");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = (await r.json()) as { setters: Setter[] };
+      setSetters(d.setters);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  async function remove(id: number, name: string) {
+    if (!confirm(`Setter "${name}" wirklich entfernen?`)) return;
+    const r = await fetch(`/api/setters?id=${id}`, { method: "DELETE" });
+    if (!r.ok) {
+      alert(`Fehler: ${r.status}`);
+      return;
+    }
+    reload();
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+
+      {setters === null && <p className="text-sm text-stone-500">Lade...</p>}
+
+      {setters?.map((s) => (
+        <SetterRow key={s.id} setter={s} onChange={reload} onRemove={() => remove(s.id, s.name)} />
+      ))}
+
+      {setters && setters.length === 0 && !showForm && (
+        <div className="rounded-2xl border border-dashed border-stone-300 p-6 text-center text-sm text-stone-500">
+          Noch kein Team. Lege den ersten Setter an.
+        </div>
+      )}
+
+      {!showForm && (
+        <button onClick={() => setShowForm(true)} className="btn-primary">+ Setter hinzufügen</button>
+      )}
+
+      {showForm && (
+        <NewSetterForm
+          onCancel={() => setShowForm(false)}
+          onCreated={() => {
+            setShowForm(false);
+            reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SetterRow({
+  setter,
+  onChange,
+  onRemove,
+}: {
+  setter: Setter;
+  onChange: () => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(setter.name);
+  const [pin, setPin] = useState("");
+  const [color, setColor] = useState(setter.color);
+  const [isAdmin, setIsAdmin] = useState(setter.isAdmin);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = { id: setter.id, name, color, isAdmin };
+      if (pin) body.pin = pin;
+      const r = await fetch("/api/setters", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        alert(`Fehler: ${d.error ?? r.status}`);
+        return;
+      }
+      setEditing(false);
+      setPin("");
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="card flex items-center gap-3 p-4">
+        <div
+          className="flex h-10 w-10 items-center justify-center rounded-full font-bold text-white"
+          style={{ background: setter.color }}
+        >
+          {setter.name
+            .split(/\s+/)
+            .map((p) => p[0])
+            .slice(0, 2)
+            .join("")
+            .toUpperCase()}
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{setter.name}</span>
+            {setter.isAdmin && (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                Admin
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-stone-500">
+            angelegt {new Date(setter.createdAt).toLocaleDateString("de-DE")}
+          </div>
+        </div>
+        <button onClick={() => setEditing(true)} className="btn-ghost h-9 px-4">
+          ✏️ Ändern
+        </button>
+        <button
+          onClick={onRemove}
+          className="inline-flex h-9 items-center gap-2 rounded-full border border-rose-200 bg-white px-4 text-sm text-rose-700 hover:bg-rose-50 transition"
+        >
+          🗑
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card space-y-3 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label-base">Name</span>
+          <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="label-base">Neue PIN (4–8 Ziffern, leer = unverändert)</span>
+          <input
+            className="input-base font-mono"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            maxLength={8}
+          />
+        </label>
+      </div>
+      <div>
+        <span className="label-base">Farbe</span>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {COLOR_PALETTE.map((c) => (
+            <button
+              key={c}
+              onClick={() => setColor(c)}
+              className={`h-8 w-8 rounded-full border-2 ${color === c ? "border-stone-900" : "border-transparent"}`}
+              style={{ background: c }}
+            />
+          ))}
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+        Admin-Rechte (Suche + Einstellungen)
+      </label>
+      <div className="flex gap-2">
+        <button onClick={save} disabled={busy} className="btn-primary">
+          {busy ? "Speichere..." : "💾 Speichern"}
+        </button>
+        <button onClick={() => setEditing(false)} className="btn-ghost">
+          Abbrechen
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [color, setColor] = useState(COLOR_PALETTE[0]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/setters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, pin, color, isAdmin }),
+      });
+      const d = (await r.json()) as { error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      onCreated();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card space-y-3 p-4">
+      <h3 className="font-semibold">Neuer Setter</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label-base">Name</span>
+          <input className="input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. Max" />
+        </label>
+        <label className="block">
+          <span className="label-base">PIN (4–8 Ziffern)</span>
+          <input
+            className="input-base font-mono"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            maxLength={8}
+            placeholder="1234"
+          />
+        </label>
+      </div>
+      <div>
+        <span className="label-base">Farbe</span>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {COLOR_PALETTE.map((c) => (
+            <button
+              key={c}
+              onClick={() => setColor(c)}
+              className={`h-8 w-8 rounded-full border-2 ${color === c ? "border-stone-900" : "border-transparent"}`}
+              style={{ background: c }}
+            />
+          ))}
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+        Admin-Rechte
+      </label>
+      {error && <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">❌ {error}</div>}
+      <div className="flex gap-2">
+        <button onClick={create} disabled={busy || !name || !pin} className="btn-primary">
+          {busy ? "Lege an..." : "Anlegen"}
+        </button>
+        <button onClick={onCancel} className="btn-ghost">
+          Abbrechen
+        </button>
+      </div>
     </div>
   );
 }

@@ -10,14 +10,32 @@ export default function ListsPage() {
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
+    let alive = true;
     fetch("/api/lists")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = (await r.json()) as { lists: ListWithStats[] };
-        setLists(data.lists);
+        if (alive) setLists(data.lists);
       })
-      .catch((e) => setError((e as Error).message));
+      .catch((e) => alive && setError((e as Error).message));
+    return () => {
+      alive = false;
+    };
   }, [refresh]);
+
+  // Statistik aktualisieren, sobald der Tab wieder Fokus bekommt — sonst zeigt
+  // die Übersicht nach Status-Wechseln in der Detail-Ansicht weiter alte Zahlen.
+  useEffect(() => {
+    function onFocus() {
+      setRefresh((n) => n + 1);
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, []);
 
   async function deleteList(id: number, name: string) {
     if (!confirm(`Liste "${name}" löschen? Alle Leads gehen verloren.`)) return;
@@ -77,6 +95,8 @@ export default function ListsPage() {
 function ListCard({ list, onDelete }: { list: ListWithStats; onDelete: () => void }) {
   const interestCount = (list.byStatus.interested ?? 0) + (list.byStatus.call_scheduled ?? 0);
   const wonCount = list.byStatus.won ?? 0;
+  const calledPct = list.total > 0 ? Math.round((list.called / list.total) * 100) : 0;
+  const touchedPct = list.total > 0 ? Math.round((list.touched / list.total) * 100) : 0;
 
   return (
     <div className="card p-5 transition hover:-translate-y-0.5 hover:shadow-md">
@@ -90,6 +110,34 @@ function ListCard({ list, onDelete }: { list: ListWithStats; onDelete: () => voi
         <button onClick={onDelete} className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-rose-600" title="Liste löschen">
           <TrashIcon />
         </button>
+      </div>
+
+      {/* Anruf-Fortschritt */}
+      <div className="mb-4 rounded-xl bg-stone-50 p-3">
+        <div className="flex items-baseline justify-between">
+          <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+            📞 Anruf-Fortschritt
+          </span>
+          <span className="text-xs font-semibold tabular-nums text-stone-700">
+            {list.called} / {list.total}
+            <span className="ml-1 text-stone-400">({calledPct}%)</span>
+          </span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white ring-1 ring-stone-200">
+          {/* Touched (status != new) – heller */}
+          <div
+            className="h-full bg-rose-200"
+            style={{ width: `${touchedPct}%` }}
+          />
+          {/* Called (≥1 Anruf) – kräftig, drüber gelegt */}
+          <div
+            className="-mt-2 h-full bg-rose-600 transition-all"
+            style={{ width: `${calledPct}%` }}
+          />
+        </div>
+        <div className="mt-1.5 text-[10px] text-stone-400">
+          {list.touched} bearbeitet · {list.total - list.touched} unangerührt
+        </div>
       </div>
 
       {/* Highlight-Stats */}

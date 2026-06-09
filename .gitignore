@@ -6,6 +6,8 @@ web/.env.local
 
 # Claude Code per-Maschine Settings (allowlist etc.)
 .claude/settings.local.json
+.claude/worktrees/
+web/.claude/
 
 # Python (Streamlit-Version)
 __pycache__/

@@ -150,10 +150,19 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
         </div>
       )}
       {lead.adresse && <div className="mt-1.5 truncate text-xs text-stone-500">{lead.adresse}</div>}
-      <div className="mt-2 flex items-center justify-between text-[10px] text-stone-400">
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-stone-400">
         <span>{lead.callCount > 0 ? `${lead.callCount}× angerufen` : "noch nicht versucht"}</span>
         <span>{lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}</span>
       </div>
+      {lead.lastSetterName && (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: lead.lastSetterColor ?? "#525252" }}
+          />
+          von {lead.lastSetterName}
+        </div>
+      )}
     </button>
   );
 }
@@ -250,11 +259,20 @@ function LeadModal({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-stone-100 p-6">
           <div className="flex-1 min-w-0">
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className={`inline-flex items-center gap-1.5 rounded-full ${currentMeta.color} px-3 py-1 text-xs font-medium text-white`}>
                 {currentMeta.emoji} {currentMeta.label}
               </span>
               {lead.kategorie && <span className="pill text-xs">{lead.kategorie}</span>}
+              {lead.lastSetterName && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2.5 py-1 text-[11px] font-medium text-stone-700 ring-1 ring-stone-200">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: lead.lastSetterColor ?? "#525252" }}
+                  />
+                  zuletzt von {lead.lastSetterName}
+                </span>
+              )}
             </div>
             <h2 className="text-2xl font-bold tracking-tight">{lead.firmenname}</h2>
             {lead.adresse && <p className="mt-1 text-sm text-stone-500">{lead.adresse}</p>}

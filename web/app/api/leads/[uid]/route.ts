@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dbGetLead, dbUpdateLead, type LeadPatch } from "@/lib/db";
+import { getCurrentSetterId } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
@@ -24,7 +25,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ uid: s
     return NextResponse.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
   try {
-    const lead = await dbUpdateLead(decodeURIComponent(uid), body);
+    const setterId = await getCurrentSetterId();
+    const lead = await dbUpdateLead(decodeURIComponent(uid), body, setterId);
     if (!lead) return NextResponse.json({ error: "nicht gefunden" }, { status: 404 });
     return NextResponse.json({ lead });
   } catch (e) {

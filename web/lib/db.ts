@@ -1,5 +1,13 @@
 import postgres from "postgres";
-import type { DbLead, Lead, LeadStatus, List, ListWithStats } from "./types";
+import type {
+  DbLead,
+  LeaderboardRow,
+  Lead,
+  LeadStatus,
+  List,
+  ListWithStats,
+  Setter,
+} from "./types";
 import { LEAD_STATUS_ORDER } from "./types";
 
 // =============================================================================
@@ -84,6 +92,34 @@ async function ensureSchema(): Promise<void> {
     )
   `;
 
+  // Setter (Team-Mitglieder) – Login per Name + PIN
+  await sql`
+    CREATE TABLE IF NOT EXISTS setters (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      pin TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#e11d48',
+      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+
+  // Audit-Log: jede Status-Bewegung wird einem Setter zugeordnet
+  await sql`
+    CREATE TABLE IF NOT EXISTS lead_events (
+      id SERIAL PRIMARY KEY,
+      lead_uid TEXT NOT NULL,
+      setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL,
+      from_status TEXT,
+      to_status TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lead_events_ts ON lead_events (ts DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lead_events_setter ON lead_events (setter_id, ts DESC)`;
+
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`;
+
   initialized = true;
 }
 
@@ -153,26 +189,39 @@ export async function dbListsAll(): Promise<ListWithStats[]> {
       id: number;
       name: string;
       created_at: string;
-      total: string;
+      total: number;
+      called: number;
+      touched: number;
       by_status: Record<string, number>;
     }[]
   >`
+    WITH per_status AS (
+      SELECT list_id, lead_status, COUNT(*)::int AS cnt
+      FROM leads
+      GROUP BY list_id, lead_status
+    ),
+    per_list AS (
+      SELECT
+        list_id,
+        COUNT(*)::int                                        AS total,
+        COUNT(*) FILTER (WHERE call_count > 0)::int          AS called,
+        COUNT(*) FILTER (WHERE lead_status <> 'new')::int    AS touched
+      FROM leads
+      GROUP BY list_id
+    )
     SELECT
       l.id,
       l.name,
       l.created_at,
-      COALESCE(SUM(le.cnt), 0)::text AS total,
+      COALESCE(pl.total, 0)   AS total,
+      COALESCE(pl.called, 0)  AS called,
+      COALESCE(pl.touched, 0) AS touched,
       COALESCE(
-        jsonb_object_agg(le.lead_status, le.cnt) FILTER (WHERE le.lead_status IS NOT NULL),
+        (SELECT jsonb_object_agg(lead_status, cnt) FROM per_status WHERE list_id = l.id),
         '{}'::jsonb
       ) AS by_status
     FROM lists l
-    LEFT JOIN (
-      SELECT list_id, lead_status, COUNT(*)::int AS cnt
-      FROM leads
-      GROUP BY list_id, lead_status
-    ) AS le ON le.list_id = l.id
-    GROUP BY l.id, l.name, l.created_at
+    LEFT JOIN per_list pl ON pl.list_id = l.id
     ORDER BY l.created_at DESC
   `;
 
@@ -186,6 +235,8 @@ export async function dbListsAll(): Promise<ListWithStats[]> {
       name: r.name,
       createdAt: r.created_at,
       total: Number(r.total),
+      called: Number(r.called),
+      touched: Number(r.touched),
       byStatus,
     };
   });
@@ -305,6 +356,9 @@ interface DbLeadRow {
   last_contact: string | null;
   call_count: number;
   next_action_at: string | null;
+  last_setter_id: number | null;
+  last_setter_name: string | null;
+  last_setter_color: string | null;
 }
 
 function rowToDbLead(r: DbLeadRow): DbLead {
@@ -332,22 +386,38 @@ function rowToDbLead(r: DbLeadRow): DbLead {
     lastContact: r.last_contact,
     callCount: r.call_count ?? 0,
     nextActionAt: r.next_action_at,
+    lastSetterId: r.last_setter_id ?? null,
+    lastSetterName: r.last_setter_name ?? null,
+    lastSetterColor: r.last_setter_color ?? null,
   };
 }
+
+const LEAD_SELECT = sql`
+  l.*,
+  s.name  AS last_setter_name,
+  s.color AS last_setter_color
+`;
 
 export async function dbLeadsByList(listId: number): Promise<DbLead[]> {
   await ensureSchema();
   const rows = await sql<DbLeadRow[]>`
-    SELECT * FROM leads
-    WHERE list_id = ${listId}
-    ORDER BY last_contact DESC NULLS LAST, last_seen DESC
+    SELECT ${LEAD_SELECT}
+    FROM leads l
+    LEFT JOIN setters s ON s.id = l.last_setter_id
+    WHERE l.list_id = ${listId}
+    ORDER BY l.last_contact DESC NULLS LAST, l.last_seen DESC
   `;
   return rows.map(rowToDbLead);
 }
 
 export async function dbLoadAll(): Promise<DbLead[]> {
   await ensureSchema();
-  const rows = await sql<DbLeadRow[]>`SELECT * FROM leads ORDER BY last_seen DESC`;
+  const rows = await sql<DbLeadRow[]>`
+    SELECT ${LEAD_SELECT}
+    FROM leads l
+    LEFT JOIN setters s ON s.id = l.last_setter_id
+    ORDER BY l.last_seen DESC
+  `;
   return rows.map(rowToDbLead);
 }
 
@@ -368,8 +438,15 @@ export interface LeadPatch {
   listId?: number;
 }
 
-export async function dbUpdateLead(uid: string, patch: LeadPatch): Promise<DbLead | null> {
+export async function dbUpdateLead(
+  uid: string,
+  patch: LeadPatch,
+  setterId: number | null = null,
+): Promise<DbLead | null> {
   await ensureSchema();
+
+  const prior = await dbGetLead(uid);
+  if (!prior) return null;
 
   // postgres.js: dynamische SET-Liste via sql() helper für Identifier + Values.
   // Wir bauen einzelne Updates auf, damit auch bumpCallCount / setLastContact (Ausdrücke
@@ -383,19 +460,201 @@ export async function dbUpdateLead(uid: string, patch: LeadPatch): Promise<DbLea
   if (patch.bumpCallCount) fragments.push(sql`call_count = call_count + 1`);
   if (patch.setLastContact) fragments.push(sql`last_contact = NOW()`);
 
-  if (fragments.length === 0) return await dbGetLead(uid);
+  // Setter merken, sobald er irgendwas am Lead bewegt
+  if (setterId !== null && (patch.leadStatus !== undefined || patch.bumpCallCount || patch.setLastContact)) {
+    fragments.push(sql`last_setter_id = ${setterId}`);
+  }
 
-  // SET a, b, c → fragments mit Kommas joinen
-  const setClause = fragments.reduce((acc, frag, i) =>
-    i === 0 ? frag : sql`${acc}, ${frag}`,
-  );
+  if (fragments.length > 0) {
+    const setClause = fragments.reduce((acc, frag, i) =>
+      i === 0 ? frag : sql`${acc}, ${frag}`,
+    );
+    await sql`UPDATE leads SET ${setClause} WHERE uid = ${uid}`;
+  }
 
-  await sql`UPDATE leads SET ${setClause} WHERE uid = ${uid}`;
+  // Status-Wechsel ins Event-Log – nur wenn sich der Status wirklich geändert hat,
+  // damit der Leaderboard-Count nicht aufgebläht wird, wenn jemand nur Notizen speichert.
+  if (patch.leadStatus !== undefined && patch.leadStatus !== prior.leadStatus) {
+    await sql`
+      INSERT INTO lead_events (lead_uid, setter_id, from_status, to_status)
+      VALUES (${uid}, ${setterId}, ${prior.leadStatus}, ${patch.leadStatus})
+    `;
+  }
+
   return await dbGetLead(uid);
 }
 
 export async function dbGetLead(uid: string): Promise<DbLead | null> {
   await ensureSchema();
-  const rows = await sql<DbLeadRow[]>`SELECT * FROM leads WHERE uid = ${uid}`;
+  const rows = await sql<DbLeadRow[]>`
+    SELECT ${LEAD_SELECT}
+    FROM leads l
+    LEFT JOIN setters s ON s.id = l.last_setter_id
+    WHERE l.uid = ${uid}
+  `;
   return rows.length > 0 ? rowToDbLead(rows[0]) : null;
+}
+
+// =============================================================================
+// SETTERS – Team-Verwaltung
+// =============================================================================
+
+export async function dbListSetters(): Promise<Setter[]> {
+  await ensureSchema();
+  const rows = await sql<
+    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+  >`
+    SELECT id, name, color, is_admin, created_at
+    FROM setters
+    ORDER BY is_admin DESC, name ASC
+  `;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    isAdmin: r.is_admin,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function dbCreateSetter(input: {
+  name: string;
+  pin: string;
+  color?: string;
+  isAdmin?: boolean;
+}): Promise<Setter> {
+  await ensureSchema();
+  const name = input.name.trim();
+  const pin = input.pin.trim();
+  if (!name) throw new Error("Name darf nicht leer sein");
+  if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN muss 4–8 Ziffern haben");
+
+  const rows = await sql<
+    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+  >`
+    INSERT INTO setters (name, pin, color, is_admin)
+    VALUES (${name}, ${pin}, ${input.color ?? "#e11d48"}, ${input.isAdmin ?? false})
+    RETURNING id, name, color, is_admin, created_at
+  `;
+  const r = rows[0];
+  return { id: r.id, name: r.name, color: r.color, isAdmin: r.is_admin, createdAt: r.created_at };
+}
+
+export async function dbUpdateSetter(
+  id: number,
+  patch: { name?: string; pin?: string; color?: string; isAdmin?: boolean },
+): Promise<void> {
+  await ensureSchema();
+  const fragments: ReturnType<typeof sql>[] = [];
+  if (patch.name !== undefined) fragments.push(sql`name = ${patch.name.trim()}`);
+  if (patch.pin !== undefined) {
+    if (!/^\d{4,8}$/.test(patch.pin)) throw new Error("PIN muss 4–8 Ziffern haben");
+    fragments.push(sql`pin = ${patch.pin}`);
+  }
+  if (patch.color !== undefined) fragments.push(sql`color = ${patch.color}`);
+  if (patch.isAdmin !== undefined) fragments.push(sql`is_admin = ${patch.isAdmin}`);
+  if (fragments.length === 0) return;
+  const setClause = fragments.reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc}, ${frag}`));
+  await sql`UPDATE setters SET ${setClause} WHERE id = ${id}`;
+}
+
+export async function dbDeleteSetter(id: number): Promise<void> {
+  await ensureSchema();
+  await sql`DELETE FROM setters WHERE id = ${id}`;
+}
+
+export async function dbVerifySetterPin(
+  setterId: number,
+  pin: string,
+): Promise<Setter | null> {
+  await ensureSchema();
+  const rows = await sql<
+    { id: number; name: string; color: string; is_admin: boolean; pin: string; created_at: string }[]
+  >`
+    SELECT id, name, color, is_admin, pin, created_at FROM setters WHERE id = ${setterId}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  if (row.pin !== pin) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    isAdmin: row.is_admin,
+    createdAt: row.created_at,
+  };
+}
+
+export async function dbGetSetter(id: number): Promise<Setter | null> {
+  await ensureSchema();
+  const rows = await sql<
+    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+  >`
+    SELECT id, name, color, is_admin, created_at FROM setters WHERE id = ${id}
+  `;
+  const r = rows[0];
+  if (!r) return null;
+  return { id: r.id, name: r.name, color: r.color, isAdmin: r.is_admin, createdAt: r.created_at };
+}
+
+export async function dbCountSetters(): Promise<number> {
+  await ensureSchema();
+  const rows = await sql<{ count: string }[]>`SELECT COUNT(*)::text AS count FROM setters`;
+  return Number(rows[0]?.count ?? 0);
+}
+
+// =============================================================================
+// LEADERBOARD
+// =============================================================================
+
+/**
+ * Zählt für jeden Setter die Status-Wechsel im Zeitfenster.
+ * "Gesettet" = Lead auf `interested` oder `call_scheduled` bewegt.
+ * `totalCalls` = Anzahl no_answer-Events (also Anrufversuche im Zeitraum).
+ */
+export async function dbLeaderboard(sinceIso: string | null): Promise<LeaderboardRow[]> {
+  await ensureSchema();
+
+  const rows = await sql<
+    {
+      setter_id: number;
+      name: string;
+      color: string;
+      interested: number;
+      call_scheduled: number;
+      won: number;
+      total_calls: number;
+    }[]
+  >`
+    SELECT
+      s.id AS setter_id,
+      s.name,
+      s.color,
+      COUNT(*) FILTER (WHERE e.to_status = 'interested')::int     AS interested,
+      COUNT(*) FILTER (WHERE e.to_status = 'call_scheduled')::int AS call_scheduled,
+      COUNT(*) FILTER (WHERE e.to_status = 'won')::int            AS won,
+      COUNT(*) FILTER (WHERE e.to_status = 'no_answer')::int      AS total_calls
+    FROM setters s
+    LEFT JOIN lead_events e
+      ON e.setter_id = s.id
+      ${sinceIso ? sql`AND e.ts >= ${sinceIso}` : sql``}
+    GROUP BY s.id, s.name, s.color
+    ORDER BY (
+      COUNT(*) FILTER (WHERE e.to_status = 'interested')
+      + COUNT(*) FILTER (WHERE e.to_status = 'call_scheduled') * 2
+      + COUNT(*) FILTER (WHERE e.to_status = 'won') * 5
+    ) DESC,
+    s.name ASC
+  `;
+
+  return rows.map((r) => ({
+    setterId: r.setter_id,
+    name: r.name,
+    color: r.color,
+    interested: Number(r.interested),
+    callScheduled: Number(r.call_scheduled),
+    won: Number(r.won),
+    totalSet: Number(r.interested) + Number(r.call_scheduled),
+    totalCalls: Number(r.total_calls),
+  }));
 }

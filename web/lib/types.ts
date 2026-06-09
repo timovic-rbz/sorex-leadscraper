@@ -59,6 +59,8 @@ export interface List {
 
 export interface ListWithStats extends List {
   total: number;
+  called: number;
+  touched: number;
   byStatus: Record<LeadStatus, number>;
 }
 
@@ -71,6 +73,35 @@ export interface DbLeadCrm {
   listId: number | null;
   firstSeen: string;
   lastSeen: string;
+  lastSetterId: number | null;
+  lastSetterName: string | null;
+  lastSetterColor: string | null;
+}
+
+export interface Setter {
+  id: number;
+  name: string;
+  color: string;
+  isAdmin: boolean;
+  createdAt: string;
+}
+
+export interface SessionInfo {
+  setterId: number | null;
+  setterName: string | null;
+  setterColor: string | null;
+  isAdmin: boolean;
+}
+
+export interface LeaderboardRow {
+  setterId: number;
+  name: string;
+  color: string;
+  interested: number;
+  callScheduled: number;
+  won: number;
+  totalSet: number;
+  totalCalls: number;
 }
 
 export type DbLead = Lead & DbLeadCrm;
