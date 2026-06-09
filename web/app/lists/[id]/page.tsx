@@ -12,6 +12,9 @@ import {
 } from "@/lib/types";
 
 const HIDDEN_STATUSES_KEY = "lead-board:hidden-statuses";
+const WEBSITE_FILTER_KEY = "lead-board:website-filter";
+
+type WebsiteFilter = "all" | "with" | "without";
 
 function loadHidden(): Set<LeadStatus> {
   if (typeof window === "undefined") return new Set();
@@ -32,6 +35,25 @@ function saveHidden(hidden: Set<LeadStatus>) {
   }
 }
 
+function loadWebsiteFilter(): WebsiteFilter {
+  if (typeof window === "undefined") return "all";
+  try {
+    const v = localStorage.getItem(WEBSITE_FILTER_KEY);
+    if (v === "with" || v === "without") return v;
+    return "all";
+  } catch {
+    return "all";
+  }
+}
+
+function saveWebsiteFilter(v: WebsiteFilter) {
+  try {
+    localStorage.setItem(WEBSITE_FILTER_KEY, v);
+  } catch {
+    /* egal */
+  }
+}
+
 interface ListResponse {
   list: List;
   leads: DbLead[];
@@ -43,9 +65,11 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [error, setError] = useState<string | null>(null);
   const [openLead, setOpenLead] = useState<DbLead | null>(null);
   const [hidden, setHidden] = useState<Set<LeadStatus>>(() => new Set());
+  const [websiteFilter, setWebsiteFilter] = useState<WebsiteFilter>("all");
 
   useEffect(() => {
     setHidden(loadHidden());
+    setWebsiteFilter(loadWebsiteFilter());
   }, []);
 
   function toggleHidden(s: LeadStatus) {
@@ -56,6 +80,11 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       saveHidden(next);
       return next;
     });
+  }
+
+  function changeWebsiteFilter(v: WebsiteFilter) {
+    setWebsiteFilter(v);
+    saveWebsiteFilter(v);
   }
 
   async function reload() {
@@ -80,10 +109,25 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     };
     if (!data) return g;
     for (const lead of data.leads) {
+      // Website-Filter vor dem Gruppieren — Counts spiegeln das echte Sicht-Set
+      if (websiteFilter === "with" && !lead.webseite) continue;
+      if (websiteFilter === "without" && lead.webseite) continue;
       const s = (lead.leadStatus ?? "new") as LeadStatus;
       (g[s] ?? g.new).push(lead);
     }
     return g;
+  }, [data, websiteFilter]);
+
+  // Header-Counts: separat berechnet, damit man sieht wieviel rausgefiltert wurde
+  const totalCounts = useMemo(() => {
+    if (!data) return { total: 0, withWebsite: 0, withoutWebsite: 0 };
+    let withWebsite = 0;
+    let withoutWebsite = 0;
+    for (const l of data.leads) {
+      if (l.webseite) withWebsite++;
+      else withoutWebsite++;
+    }
+    return { total: data.leads.length, withWebsite, withoutWebsite };
   }, [data]);
 
   if (error)
@@ -107,6 +151,30 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         <Link href="/" className="btn-ghost h-9">+ Mehr Leads suchen</Link>
       </header>
+
+      {/* Website-Filter (Segmented Control) */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-stone-500">Website:</span>
+        <div className="inline-flex gap-0.5 rounded-full bg-stone-100 p-0.5">
+          <WebsitePill
+            active={websiteFilter === "all"}
+            onClick={() => changeWebsiteFilter("all")}
+            label={`Alle (${totalCounts.total})`}
+          />
+          <WebsitePill
+            active={websiteFilter === "without"}
+            onClick={() => changeWebsiteFilter("without")}
+            label={`🌐✗ Ohne (${totalCounts.withoutWebsite})`}
+            color="text-amber-700"
+          />
+          <WebsitePill
+            active={websiteFilter === "with"}
+            onClick={() => changeWebsiteFilter("with")}
+            label={`🌐 Mit (${totalCounts.withWebsite})`}
+            color="text-emerald-700"
+          />
+        </div>
+      </div>
 
       {/* Status-Filter-Leiste: aktive Status sind sichtbar, ausgegraute kollabieren */}
       <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
@@ -217,6 +285,31 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
     </div>
+  );
+}
+
+function WebsitePill({
+  active,
+  onClick,
+  label,
+  color,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  color?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`whitespace-nowrap rounded-full px-3 py-1 font-medium transition ${
+        active
+          ? "bg-white shadow-sm " + (color ?? "text-stone-900")
+          : "text-stone-500 hover:text-stone-700"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
