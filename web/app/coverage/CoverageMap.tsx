@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import {
   MapContainer,
@@ -8,8 +8,11 @@ import {
   GeoJSON,
   CircleMarker,
   Tooltip,
+  useMap,
 } from "react-leaflet";
 import type { Feature, GeoJsonObject } from "geojson";
+import type { Map as LeafletMap } from "leaflet";
+import L from "leaflet";
 
 interface City {
   ort: string;
@@ -25,17 +28,36 @@ interface Marker extends City {
   polygon: GeoJsonObject | null;
 }
 
-// NRW-Mitte ≈ Dortmund
+interface CityDetail {
+  ort: string;
+  byService: Array<{ dienstleistung: string; total: number; called: number; touched: number }>;
+  byPlz: Array<{ plz: string; total: number; called: number; touched: number }>;
+  byStatus: Array<{ status: string; count: number }>;
+}
+
 const NRW_CENTER: [number, number] = [51.5, 7.5];
+
+const STATUS_LABELS: Record<string, { label: string; emoji: string }> = {
+  new: { label: "Neu", emoji: "🆕" },
+  no_answer: { label: "Nicht erreicht", emoji: "📵" },
+  interested: { label: "Interessiert", emoji: "🔥" },
+  call_scheduled: { label: "Call vereinbart", emoji: "📅" },
+  won: { label: "Kunde", emoji: "🏆" },
+  not_interested: { label: "Kein Interesse", emoji: "❌" },
+  lost: { label: "Verloren", emoji: "🪦" },
+};
 
 export default function CoverageMap({ cities }: { cities: City[] }) {
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failed, setFailed] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Marker | null>(null);
+  const [detail, setDetail] = useState<CityDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const mapRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
     let alive = true;
-
     (async () => {
       if (cities.length === 0) return;
       setProgress({ done: 0, total: cities.length });
@@ -53,12 +75,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
               polygon: GeoJsonObject | null;
               cached?: boolean;
             };
-            collected.push({
-              ...city,
-              lat: d.lat,
-              lng: d.lng,
-              polygon: d.polygon,
-            });
+            collected.push({ ...city, lat: d.lat, lng: d.lng, polygon: d.polygon });
             if (!d.cached) await new Promise((res) => setTimeout(res, 1100));
           } else {
             errors.push(city.ort);
@@ -68,19 +85,56 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
         }
         if (!alive) return;
         setProgress({ done: i + 1, total: cities.length });
-        // Inkrementell anzeigen, damit man Fortschritt sieht
         setMarkers([...collected]);
       }
-
       if (!alive) return;
       setFailed(errors);
       setProgress(null);
     })();
-
     return () => {
       alive = false;
     };
   }, [cities]);
+
+  // Detail beim Auswählen einer Stadt nachladen
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return;
+    }
+    let alive = true;
+    setDetailLoading(true);
+    fetch(`/api/coverage/city?ort=${encodeURIComponent(selected.ort)}`)
+      .then((r) => r.json())
+      .then((d: CityDetail) => {
+        if (alive) setDetail(d);
+      })
+      .catch(() => {
+        if (alive) setDetail(null);
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selected]);
+
+  function zoomTo(m: Marker) {
+    const map = mapRef.current;
+    if (!map) return;
+    if (m.polygon) {
+      // Geojson bounds berechnen
+      const layer = L.geoJSON(m.polygon);
+      map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+    } else {
+      map.setView([m.lat, m.lng], 13);
+    }
+  }
+
+  function resetView() {
+    mapRef.current?.setView(NRW_CENTER, 8);
+  }
 
   return (
     <div className="space-y-3">
@@ -107,92 +161,297 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
         </div>
       )}
 
-      <div className="h-[500px] overflow-hidden rounded-2xl border border-stone-200 shadow-sm sm:h-[600px]">
-        <MapContainer
-          center={NRW_CENTER}
-          zoom={8}
-          scrollWheelZoom={true}
-          style={{ height: "100%", width: "100%" }}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          {markers.map((m) => {
-            const calledPct = m.total > 0 ? m.called / m.total : 0;
-            const color = colorForProgress(calledPct);
-            const opacity = fillOpacityFor(calledPct);
+      {/* Karten-Container + Detail-Drawer */}
+      <div className="relative">
+        <div className="h-[500px] overflow-hidden rounded-2xl border border-stone-200 shadow-sm sm:h-[600px]">
+          <MapContainer
+            center={NRW_CENTER}
+            zoom={8}
+            scrollWheelZoom
+            style={{ height: "100%", width: "100%" }}
+            ref={(m) => {
+              if (m) mapRef.current = m;
+            }}
+          >
+            <MapClickResetter onMapClick={() => setSelected(null)} />
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {markers.map((m) => {
+              const calledPct = m.total > 0 ? m.called / m.total : 0;
+              const color = colorForProgress(calledPct);
+              const opacity = fillOpacityFor(calledPct);
+              const isSelected = selected?.ort === m.ort;
 
-            // Wenn Polygon da: gefärbte Stadt-Grenze. Sonst Fallback Circle.
-            if (m.polygon) {
+              if (m.polygon) {
+                return (
+                  <GeoJSON
+                    key={`${m.ort}-${calledPct.toFixed(2)}-${isSelected}`}
+                    data={m.polygon}
+                    style={() => ({
+                      color: isSelected ? "#0c4a6e" : color,
+                      fillColor: color,
+                      fillOpacity: opacity,
+                      weight: isSelected ? 4 : 2,
+                    })}
+                    onEachFeature={(_: Feature, layer) => {
+                      layer.bindTooltip(tooltipHtml(m, calledPct), {
+                        direction: "top",
+                        sticky: true,
+                      });
+                      layer.on("click", (e) => {
+                        // Verhindere dass das Karten-Click-Event den State zurücksetzt
+                        L.DomEvent.stopPropagation(e);
+                        setSelected(m);
+                      });
+                    }}
+                  />
+                );
+              }
+
               return (
-                <GeoJSON
-                  key={`${m.ort}-${calledPct.toFixed(2)}`}
-                  data={m.polygon}
-                  style={() => ({
-                    color: color,
+                <CircleMarker
+                  key={m.ort}
+                  center={[m.lat, m.lng]}
+                  radius={12}
+                  pathOptions={{
+                    color: isSelected ? "#0c4a6e" : color,
                     fillColor: color,
                     fillOpacity: opacity,
-                    weight: 2,
-                  })}
-                  onEachFeature={(_: Feature, layer) => {
-                    layer.bindTooltip(
-                      tooltipHtml(m, calledPct),
-                      { direction: "top", sticky: true },
-                    );
+                    weight: isSelected ? 4 : 2,
                   }}
-                />
+                  eventHandlers={{
+                    click: () => setSelected(m),
+                  }}
+                >
+                  <Tooltip direction="top" sticky>
+                    <div dangerouslySetInnerHTML={{ __html: tooltipHtml(m, calledPct) }} />
+                  </Tooltip>
+                </CircleMarker>
               );
-            }
+            })}
+          </MapContainer>
 
-            return (
-              <CircleMarker
-                key={m.ort}
-                center={[m.lat, m.lng]}
-                radius={12}
-                pathOptions={{
-                  color: color,
-                  fillColor: color,
-                  fillOpacity: opacity,
-                  weight: 2,
-                }}
-              >
-                <Tooltip direction="top" sticky>
-                  <div dangerouslySetInnerHTML={{ __html: tooltipHtml(m, calledPct) }} />
-                </Tooltip>
-              </CircleMarker>
-            );
-          })}
-        </MapContainer>
+          {/* Floating Reset-Button */}
+          {mapRef.current && (
+            <button
+              onClick={resetView}
+              className="absolute right-3 top-3 z-[400] rounded-full bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-md ring-1 ring-stone-200 hover:bg-stone-50"
+            >
+              🗺 NRW
+            </button>
+          )}
+        </div>
+
+        {/* Detail-Drawer rechts (Desktop) / Bottom-Sheet (Mobile) */}
+        {selected && (
+          <div
+            className="absolute inset-y-0 right-0 z-[500] flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl lg:right-3 lg:top-3 lg:max-h-[calc(100%-1.5rem)]"
+            style={{ marginBottom: "0.75rem", marginTop: "0.75rem" }}
+          >
+            <CityPanel
+              marker={selected}
+              detail={detail}
+              loading={detailLoading}
+              onClose={() => setSelected(null)}
+              onZoom={() => zoomTo(selected)}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Legende: Anrufquote-Farbverlauf */}
+      {/* Legende */}
       <div className="card flex flex-wrap items-center gap-3 p-3 text-xs text-stone-600">
         <span className="font-medium text-stone-700">Anrufquote pro Stadt:</span>
-        <div className="flex items-center gap-1">
-          <LegendBox color="#fda4af" />
-          <span>0%</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <LegendBox color="#f43f5e" />
-          <span>25%</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <LegendBox color="#e11d48" />
-          <span>50%</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <LegendBox color="#9f1239" />
-          <span>75%</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <LegendBox color="#4c0519" />
-          <span>100% ✓</span>
-        </div>
+        {(
+          [
+            ["#fda4af", "0%"],
+            ["#f43f5e", "25%"],
+            ["#e11d48", "50%"],
+            ["#9f1239", "75%"],
+            ["#4c0519", "100% ✓"],
+          ] as const
+        ).map(([c, l]) => (
+          <div key={l} className="flex items-center gap-1">
+            <LegendBox color={c} />
+            <span>{l}</span>
+          </div>
+        ))}
         <span className="ml-auto text-stone-400">
-          Stadtgrenzen via OpenStreetMap
+          Klick auf Stadt → Details · Doppelklick → Zoom
         </span>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Hooks + Subcomponents
+// ============================================================================
+
+function MapClickResetter({ onMapClick }: { onMapClick: () => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const handler = () => onMapClick();
+    map.on("click", handler);
+    return () => {
+      map.off("click", handler);
+    };
+  }, [map, onMapClick]);
+  return null;
+}
+
+function CityPanel({
+  marker,
+  detail,
+  loading,
+  onClose,
+  onZoom,
+}: {
+  marker: Marker;
+  detail: CityDetail | null;
+  loading: boolean;
+  onClose: () => void;
+  onZoom: () => void;
+}) {
+  const calledPct = marker.total > 0 ? marker.called / marker.total : 0;
+
+  return (
+    <>
+      <div className="flex items-center justify-between border-b border-stone-100 p-4">
+        <div>
+          <h3 className="text-lg font-bold tracking-tight">{marker.ort}</h3>
+          <p className="text-xs text-stone-500">
+            {marker.total} Leads · {marker.called} angerufen ({Math.round(calledPct * 100)}%)
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-full p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+          aria-label="Schließen"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex gap-2 border-b border-stone-100 px-4 py-3">
+        <button
+          onClick={onZoom}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-stone-900 px-3 py-2 text-xs font-medium text-white hover:bg-stone-800"
+        >
+          🔍 Reinzoomen
+        </button>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto p-4 text-sm">
+        {loading && <p className="text-stone-500">Lade Details…</p>}
+
+        {detail && !loading && (
+          <>
+            {/* Status-Aufschlüsselung */}
+            <Section title="Status-Verteilung">
+              <div className="grid grid-cols-2 gap-2">
+                {detail.byStatus
+                  .sort((a, b) => b.count - a.count)
+                  .map((s) => {
+                    const meta = STATUS_LABELS[s.status] ?? { label: s.status, emoji: "•" };
+                    return (
+                      <div
+                        key={s.status}
+                        className="flex items-center gap-2 rounded-lg bg-stone-50 px-3 py-2"
+                      >
+                        <span>{meta.emoji}</span>
+                        <span className="flex-1 truncate text-xs">{meta.label}</span>
+                        <span className="font-semibold tabular-nums">{s.count}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </Section>
+
+            {/* Dienstleistungs-Aufschlüsselung */}
+            <Section title="Pro Dienstleistung">
+              <div className="space-y-1.5">
+                {detail.byService.map((d) => {
+                  const pct = d.total > 0 ? Math.round((d.called / d.total) * 100) : 0;
+                  return (
+                    <div key={d.dienstleistung} className="rounded-lg bg-stone-50 p-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium">{d.dienstleistung}</span>
+                        <span className="tabular-nums text-stone-600">
+                          {d.called} / {d.total} · {pct}%
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-stone-200">
+                        <div
+                          className="h-full bg-rose-500"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+
+            {/* PLZ-Aufschlüsselung (Stadtteil-Proxy) */}
+            <Section
+              title={`Nach Postleitzahl (${detail.byPlz.length} ${
+                detail.byPlz.length === 1 ? "Bezirk" : "Bezirke"
+              })`}
+            >
+              <p className="mb-2 text-[11px] text-stone-500">
+                PLZ entspricht in deutschen Städten meist einem Stadtteil/Bezirk.
+              </p>
+              <div className="overflow-hidden rounded-lg ring-1 ring-stone-200">
+                <table className="w-full text-xs">
+                  <thead className="bg-stone-50 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                    <tr>
+                      <th className="px-2 py-2">PLZ</th>
+                      <th className="px-2 py-2 text-right">Leads</th>
+                      <th className="px-2 py-2 text-right">Angerufen</th>
+                      <th className="px-2 py-2">Fortschritt</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {detail.byPlz.map((p) => {
+                      const pct = p.total > 0 ? Math.round((p.called / p.total) * 100) : 0;
+                      return (
+                        <tr key={p.plz}>
+                          <td className="px-2 py-2 font-mono">{p.plz}</td>
+                          <td className="px-2 py-2 text-right tabular-nums font-semibold">
+                            {p.total}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {p.called} <span className="text-stone-400">({pct}%)</span>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="h-1 overflow-hidden rounded-full bg-stone-100">
+                              <div className="h-full bg-rose-500" style={{ width: `${pct}%` }} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
@@ -207,7 +466,6 @@ function LegendBox({ color }: { color: string }) {
 }
 
 function tooltipHtml(m: Marker, pct: number): string {
-  // Wir bauen einen kleinen HTML-Block — Leaflet rendert das im Tooltip
   const services = m.services.slice(0, 5).join(", ");
   const more = m.services.length > 5 ? ` +${m.services.length - 5}` : "";
   return `
@@ -217,6 +475,7 @@ function tooltipHtml(m: Marker, pct: number): string {
       <div>📞 ${m.called} angerufen (${Math.round(pct * 100)}%)</div>
       <div>✅ ${m.touched} bearbeitet</div>
       <div style="color:#78716c;margin-top:4px">${escapeHtml(services)}${escapeHtml(more)}</div>
+      <div style="margin-top:4px;color:#0c4a6e;font-weight:500">Klick für Details</div>
     </div>
   `;
 }
@@ -229,23 +488,15 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * Farbverlauf hellrot → dunkelrot anhand der Anrufquote.
- * Nicht über continuous interpolate gehen — Tailwind-Stamm-Töne lesen sich besser.
- */
 function colorForProgress(pct: number): string {
-  // Hellrot (unangerührt) → dunkelrot (komplett durch). Bewusst kräftig
-  // ab Stufe 1 damit jede Stadt klar erkennbar ist.
-  if (pct < 0.05) return "#fda4af"; // rose-300 – fast unangerührt, aber sichtbar
-  if (pct < 0.25) return "#fb7185"; // rose-400
-  if (pct < 0.5) return "#f43f5e";  // rose-500
-  if (pct < 0.75) return "#e11d48"; // rose-600
-  if (pct < 1.0) return "#9f1239";  // rose-800
-  return "#4c0519";                  // rose-950 – komplett durch
+  if (pct < 0.05) return "#fda4af";
+  if (pct < 0.25) return "#fb7185";
+  if (pct < 0.5) return "#f43f5e";
+  if (pct < 0.75) return "#e11d48";
+  if (pct < 1.0) return "#9f1239";
+  return "#4c0519";
 }
 
 function fillOpacityFor(pct: number): number {
-  // 0%: 0.50 – Stadt klar erkennbar
-  // 100%: 0.85 – kräftig gefüllt
   return 0.5 + pct * 0.35;
 }

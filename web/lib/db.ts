@@ -895,6 +895,73 @@ export async function dbCoverage(): Promise<CoverageRow[]> {
 // GEO-CACHE – Lat/Lng für Städte, einmal über Nominatim geholt
 // =============================================================================
 
+export interface CityDetail {
+  ort: string;
+  byService: Array<{ dienstleistung: string; total: number; called: number; touched: number }>;
+  byPlz: Array<{ plz: string; total: number; called: number; touched: number }>;
+  byStatus: Array<{ status: string; count: number }>;
+}
+
+export async function dbCityDetail(ort: string): Promise<CityDetail> {
+  await ensureSchema();
+  const [byService, byPlz, byStatus] = await Promise.all([
+    sql<
+      { dienstleistung: string; total: string; called: string; touched: string }[]
+    >`
+      SELECT
+        COALESCE(NULLIF(TRIM(dienstleistung), ''), '?') AS dienstleistung,
+        COUNT(*)::text                                     AS total,
+        COUNT(*) FILTER (WHERE call_count > 0)::text       AS called,
+        COUNT(*) FILTER (WHERE lead_status <> 'new')::text AS touched
+      FROM leads
+      WHERE ort = ${ort}
+      GROUP BY 1
+      ORDER BY COUNT(*) DESC
+    `,
+    sql<
+      { plz: string; total: string; called: string; touched: string }[]
+    >`
+      SELECT
+        COALESCE(SUBSTRING(adresse FROM '[0-9]{5}'), '?') AS plz,
+        COUNT(*)::text                                     AS total,
+        COUNT(*) FILTER (WHERE call_count > 0)::text       AS called,
+        COUNT(*) FILTER (WHERE lead_status <> 'new')::text AS touched
+      FROM leads
+      WHERE ort = ${ort}
+      GROUP BY 1
+      ORDER BY COUNT(*) DESC
+    `,
+    sql<{ status: string; count: string }[]>`
+      SELECT
+        COALESCE(NULLIF(lead_status, ''), 'new') AS status,
+        COUNT(*)::text AS count
+      FROM leads
+      WHERE ort = ${ort}
+      GROUP BY 1
+    `,
+  ]);
+
+  return {
+    ort,
+    byService: byService.map((r) => ({
+      dienstleistung: r.dienstleistung,
+      total: Number(r.total),
+      called: Number(r.called),
+      touched: Number(r.touched),
+    })),
+    byPlz: byPlz.map((r) => ({
+      plz: r.plz,
+      total: Number(r.total),
+      called: Number(r.called),
+      touched: Number(r.touched),
+    })),
+    byStatus: byStatus.map((r) => ({
+      status: r.status,
+      count: Number(r.count),
+    })),
+  };
+}
+
 export async function dbGetCachedCoord(
   query: string,
 ): Promise<{ lat: number; lng: number; polygon: string | null } | null> {
