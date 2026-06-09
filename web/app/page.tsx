@@ -525,6 +525,12 @@ function SaveBar({ leads, defaultListName }: { leads: LeadWithStatus[]; defaultL
   const [newName, setNewName] = useState(defaultListName);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Default: Duplikate überspringen – fast immer das, was man will.
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
+
+  const nNew = leads.filter((l) => l.dbStatus === "neu").length;
+  const nKnown = leads.length - nNew;
+  const leadsToSave = skipDuplicates ? leads.filter((l) => l.dbStatus === "neu") : leads;
 
   useEffect(() => {
     fetch("/api/lists")
@@ -538,6 +544,10 @@ function SaveBar({ leads, defaultListName }: { leads: LeadWithStatus[]; defaultL
   }, []);
 
   async function save() {
+    if (leadsToSave.length === 0) {
+      setMsg("Keine Leads zum Speichern (alle als Duplikate markiert).");
+      return;
+    }
     setSaving(true);
     setMsg(null);
     try {
@@ -563,7 +573,7 @@ function SaveBar({ leads, defaultListName }: { leads: LeadWithStatus[]; defaultL
       const r = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leads, listId }),
+        body: JSON.stringify({ leads: leadsToSave, listId }),
       });
       // Bei Function-Timeout liefert Vercel HTML statt JSON → r.json() würde
       // werfen mit einer nichtssagenden Fehlermeldung. Lieber erstmal als Text
@@ -593,30 +603,64 @@ function SaveBar({ leads, defaultListName }: { leads: LeadWithStatus[]; defaultL
     }
   }
 
+  const saveLabel = saving
+    ? "⏳ Speichere..."
+    : skipDuplicates
+    ? `💾 ${leadsToSave.length} neue speichern`
+    : `💾 ${leadsToSave.length} Leads speichern`;
+
   return (
-    <div className="card flex flex-wrap items-end gap-4 p-5">
-      <div className="flex-1 min-w-[200px]">
-        <label className="label-base">In Liste speichern</label>
-        <select value={selected} onChange={(e) => setSelected(e.target.value)} className="input-base">
-          {lists.map((l) => (
-            <option key={l.id} value={String(l.id)}>{l.name}</option>
-          ))}
-          <option value="__new__">+ Neue Liste anlegen…</option>
-        </select>
-      </div>
-      {selected === "__new__" && (
+    <div className="card space-y-4 p-5">
+      <div className="flex flex-wrap items-end gap-4">
         <div className="flex-1 min-w-[200px]">
-          <Field label="Name der neuen Liste" value={newName} onChange={setNewName} placeholder="z.B. Düsseldorf Kosmetik" />
+          <label className="label-base">In Liste speichern</label>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)} className="input-base">
+            {lists.map((l) => (
+              <option key={l.id} value={String(l.id)}>{l.name}</option>
+            ))}
+            <option value="__new__">+ Neue Liste anlegen…</option>
+          </select>
         </div>
-      )}
-      <button disabled={saving} onClick={save} className="btn-dark">
-        {saving ? "⏳ Speichere..." : "💾 Speichern"}
-      </button>
+        {selected === "__new__" && (
+          <div className="flex-1 min-w-[200px]">
+            <Field label="Name der neuen Liste" value={newName} onChange={setNewName} placeholder="z.B. Düsseldorf Kosmetik" />
+          </div>
+        )}
+        <button disabled={saving || leadsToSave.length === 0} onClick={save} className="btn-dark disabled:opacity-50">
+          {saveLabel}
+        </button>
+      </div>
+
+      {/* Duplikat-Filter */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 pt-3 text-sm">
+        <label className="flex items-center gap-2 text-stone-700">
+          <input
+            type="checkbox"
+            checked={skipDuplicates}
+            onChange={(e) => setSkipDuplicates(e.target.checked)}
+            className="h-4 w-4 accent-rose-600"
+          />
+          <span>
+            Duplikate überspringen
+            {nKnown > 0 && (
+              <span className="ml-1 text-stone-500">
+                ({nKnown} bekannte werden{skipDuplicates ? " ignoriert" : " mitgespeichert"})
+              </span>
+            )}
+          </span>
+        </label>
+        {nKnown > 0 && (
+          <span className="rounded-full bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
+            🆕 {nNew} neu · 🔁 {nKnown} bekannt
+          </span>
+        )}
+      </div>
+
       {msg && (
-        <span className="text-sm">
+        <div className="border-t border-stone-100 pt-3 text-sm">
           {msg}
           {msg.startsWith("✅") && <a href="/lists" className="ml-2 text-rose-600 hover:underline">→ Zur Liste</a>}
-        </span>
+        </div>
       )}
     </div>
   );
