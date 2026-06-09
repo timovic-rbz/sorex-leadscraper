@@ -28,10 +28,21 @@ interface Marker extends City {
   polygon: GeoJsonObject | null;
 }
 
+interface PlzStat {
+  plz: string;
+  total: number;
+  called: number;
+  touched: number;
+}
+
+interface District extends PlzStat {
+  polygon: GeoJsonObject;
+}
+
 interface CityDetail {
   ort: string;
   byService: Array<{ dienstleistung: string; total: number; called: number; touched: number }>;
-  byPlz: Array<{ plz: string; total: number; called: number; touched: number }>;
+  byPlz: PlzStat[];
   byStatus: Array<{ status: string; count: number }>;
 }
 
@@ -54,6 +65,13 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
   const [selected, setSelected] = useState<Marker | null>(null);
   const [detail, setDetail] = useState<CityDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Stadtteil-View: Sub-Polygone für die zoomed-in Stadt
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [districtsCity, setDistrictsCity] = useState<string | null>(null);
+  const [districtsProgress, setDistrictsProgress] = useState<{ done: number; total: number } | null>(null);
+  const districtsAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+
   const mapRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
@@ -120,21 +138,85 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
     };
   }, [selected]);
 
-  function zoomTo(m: Marker) {
+  /**
+   * Reinzoomen auf eine Stadt: Karten-Zoom + asynchron PLZ-Polygone laden.
+   * Wenn der User zwischendrin weiterklickt, wird die Schleife abgebrochen.
+   */
+  async function zoomTo(m: Marker) {
     const map = mapRef.current;
     if (!map) return;
     if (m.polygon) {
-      // Geojson bounds berechnen
       const layer = L.geoJSON(m.polygon);
       map.fitBounds(layer.getBounds(), { padding: [40, 40] });
     } else {
-      map.setView([m.lat, m.lng], 13);
+      map.setView([m.lat, m.lng], 12);
     }
+
+    // Vorherige Loop abbrechen, neuen Cancel-Token anlegen
+    districtsAbortRef.current.cancelled = true;
+    const myToken = { cancelled: false };
+    districtsAbortRef.current = myToken;
+
+    // detail kann noch null sein wenn schnell geklickt — kurze Wartezeit
+    let plzs: PlzStat[] = [];
+    const waitMs = 30;
+    for (let i = 0; i < 50; i++) {
+      if (detail?.ort === m.ort) break;
+      await new Promise((res) => setTimeout(res, waitMs));
+      if (myToken.cancelled) return;
+    }
+    plzs = (detail?.ort === m.ort ? detail.byPlz : []).filter((p) => p.plz !== "?");
+
+    setDistricts([]);
+    setDistrictsCity(m.ort);
+
+    if (plzs.length === 0) {
+      setDistrictsProgress(null);
+      return;
+    }
+
+    setDistrictsProgress({ done: 0, total: plzs.length });
+    const collected: District[] = [];
+
+    for (let i = 0; i < plzs.length; i++) {
+      if (myToken.cancelled) return;
+      const p = plzs[i];
+      try {
+        const r = await fetch(
+          `/api/geocode?q=${encodeURIComponent(p.plz + " " + m.ort)}`,
+        );
+        if (r.ok) {
+          const d = (await r.json()) as {
+            polygon: GeoJsonObject | null;
+            cached?: boolean;
+          };
+          if (d.polygon) {
+            collected.push({ ...p, polygon: d.polygon });
+            if (!myToken.cancelled) setDistricts([...collected]);
+          }
+          if (!d.cached && !myToken.cancelled) {
+            await new Promise((res) => setTimeout(res, 1100));
+          }
+        }
+      } catch {
+        /* ignorieren — kein Polygon für diese PLZ */
+      }
+      if (!myToken.cancelled) {
+        setDistrictsProgress({ done: i + 1, total: plzs.length });
+      }
+    }
+    if (!myToken.cancelled) setDistrictsProgress(null);
   }
 
   function resetView() {
     mapRef.current?.setView(NRW_CENTER, 8);
+    districtsAbortRef.current.cancelled = true;
+    setDistricts([]);
+    setDistrictsCity(null);
+    setDistrictsProgress(null);
   }
+
+  const isZoomed = districtsCity !== null;
 
   return (
     <div className="space-y-3">
@@ -155,13 +237,32 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
         </div>
       )}
 
+      {districtsProgress && (
+        <div className="card flex items-center gap-3 p-3 text-sm text-stone-700">
+          <div className="animate-pulse text-lg">🏘</div>
+          <div className="flex-1">
+            <div>
+              PLZ-Bezirke {districtsCity} laden {districtsProgress.done} /{" "}
+              {districtsProgress.total} …
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-stone-100">
+              <div
+                className="h-full rounded-full bg-sky-500 transition-all"
+                style={{
+                  width: `${(districtsProgress.done / districtsProgress.total) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {failed.length > 0 && (
         <div className="card border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           ⚠ Keine Daten für: {failed.join(", ")}
         </div>
       )}
 
-      {/* Karten-Container + Detail-Drawer */}
       <div className="relative">
         <div className="h-[500px] overflow-hidden rounded-2xl border border-stone-200 shadow-sm sm:h-[600px]">
           <MapContainer
@@ -178,22 +279,27 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+
+            {/* Stadt-Polygone (Übersicht) */}
             {markers.map((m) => {
               const calledPct = m.total > 0 ? m.called / m.total : 0;
               const color = colorForProgress(calledPct);
-              const opacity = fillOpacityFor(calledPct);
               const isSelected = selected?.ort === m.ort;
+              const isDimmed = isZoomed && districtsCity === m.ort;
+              // Wenn auf Stadt zoomed: Polygon nur als Outline, ohne Füllung —
+              // damit die PLZ-Polygone darunter klar sichtbar sind.
+              const opacity = isDimmed ? 0 : fillOpacityFor(calledPct);
 
               if (m.polygon) {
                 return (
                   <GeoJSON
-                    key={`${m.ort}-${calledPct.toFixed(2)}-${isSelected}`}
+                    key={`${m.ort}-${calledPct.toFixed(2)}-${isSelected}-${isDimmed}`}
                     data={m.polygon}
                     style={() => ({
-                      color: isSelected ? "#0c4a6e" : color,
+                      color: isSelected || isDimmed ? "#0c4a6e" : color,
                       fillColor: color,
                       fillOpacity: opacity,
-                      weight: isSelected ? 4 : 2,
+                      weight: isSelected || isDimmed ? 3 : 2,
                     })}
                     onEachFeature={(_: Feature, layer) => {
                       layer.bindTooltip(tooltipHtml(m, calledPct), {
@@ -201,7 +307,6 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
                         sticky: true,
                       });
                       layer.on("click", (e) => {
-                        // Verhindere dass das Karten-Click-Event den State zurücksetzt
                         L.DomEvent.stopPropagation(e);
                         setSelected(m);
                       });
@@ -231,17 +336,41 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
                 </CircleMarker>
               );
             })}
+
+            {/* PLZ-Polygone (Stadtteil-View, sichtbar nur wenn reinzoomed) */}
+            {districts.map((d) => {
+              const calledPct = d.total > 0 ? d.called / d.total : 0;
+              const color = colorForProgress(calledPct);
+              const opacity = fillOpacityFor(calledPct);
+              return (
+                <GeoJSON
+                  key={`plz-${d.plz}-${calledPct.toFixed(2)}`}
+                  data={d.polygon}
+                  style={() => ({
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: opacity,
+                    weight: 2,
+                    dashArray: "4 3",
+                  })}
+                  onEachFeature={(_: Feature, layer) => {
+                    layer.bindTooltip(districtTooltipHtml(d, calledPct), {
+                      direction: "top",
+                      sticky: true,
+                    });
+                  }}
+                />
+              );
+            })}
           </MapContainer>
 
           {/* Floating Reset-Button */}
-          {mapRef.current && (
-            <button
-              onClick={resetView}
-              className="absolute right-3 top-3 z-[400] rounded-full bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-md ring-1 ring-stone-200 hover:bg-stone-50"
-            >
-              🗺 NRW
-            </button>
-          )}
+          <button
+            onClick={resetView}
+            className="absolute right-3 top-3 z-[400] rounded-full bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-md ring-1 ring-stone-200 hover:bg-stone-50"
+          >
+            🗺 NRW
+          </button>
         </div>
 
         {/* Detail-Drawer rechts (Desktop) / Bottom-Sheet (Mobile) */}
@@ -256,6 +385,8 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
               loading={detailLoading}
               onClose={() => setSelected(null)}
               onZoom={() => zoomTo(selected)}
+              districtsLoaded={districtsCity === selected.ort && districts.length > 0}
+              districtsLoading={districtsProgress !== null}
             />
           </div>
         )}
@@ -263,7 +394,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
 
       {/* Legende */}
       <div className="card flex flex-wrap items-center gap-3 p-3 text-xs text-stone-600">
-        <span className="font-medium text-stone-700">Anrufquote pro Stadt:</span>
+        <span className="font-medium text-stone-700">Anrufquote:</span>
         {(
           [
             ["#fda4af", "0%"],
@@ -279,7 +410,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
           </div>
         ))}
         <span className="ml-auto text-stone-400">
-          Klick auf Stadt → Details · Doppelklick → Zoom
+          Klick = Details · „Reinzoomen" zeigt PLZ-Bezirke
         </span>
       </div>
     </div>
@@ -287,7 +418,7 @@ export default function CoverageMap({ cities }: { cities: City[] }) {
 }
 
 // ============================================================================
-// Hooks + Subcomponents
+// Subcomponents
 // ============================================================================
 
 function MapClickResetter({ onMapClick }: { onMapClick: () => void }) {
@@ -308,12 +439,16 @@ function CityPanel({
   loading,
   onClose,
   onZoom,
+  districtsLoaded,
+  districtsLoading,
 }: {
   marker: Marker;
   detail: CityDetail | null;
   loading: boolean;
   onClose: () => void;
   onZoom: () => void;
+  districtsLoaded: boolean;
+  districtsLoading: boolean;
 }) {
   const calledPct = marker.total > 0 ? marker.called / marker.total : 0;
 
@@ -338,9 +473,14 @@ function CityPanel({
       <div className="flex gap-2 border-b border-stone-100 px-4 py-3">
         <button
           onClick={onZoom}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-stone-900 px-3 py-2 text-xs font-medium text-white hover:bg-stone-800"
+          disabled={districtsLoading}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-stone-900 px-3 py-2 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50"
         >
-          🔍 Reinzoomen
+          {districtsLoading
+            ? "⏳ Lädt PLZ-Bezirke…"
+            : districtsLoaded
+            ? "🔍 Erneut zoomen"
+            : "🔍 Reinzoomen + Bezirke zeigen"}
         </button>
       </div>
 
@@ -349,7 +489,6 @@ function CityPanel({
 
         {detail && !loading && (
           <>
-            {/* Status-Aufschlüsselung */}
             <Section title="Status-Verteilung">
               <div className="grid grid-cols-2 gap-2">
                 {detail.byStatus
@@ -370,7 +509,6 @@ function CityPanel({
               </div>
             </Section>
 
-            {/* Dienstleistungs-Aufschlüsselung */}
             <Section title="Pro Dienstleistung">
               <div className="space-y-1.5">
                 {detail.byService.map((d) => {
@@ -384,10 +522,7 @@ function CityPanel({
                         </span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-stone-200">
-                        <div
-                          className="h-full bg-rose-500"
-                          style={{ width: `${pct}%` }}
-                        />
+                        <div className="h-full bg-rose-500" style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   );
@@ -395,14 +530,13 @@ function CityPanel({
               </div>
             </Section>
 
-            {/* PLZ-Aufschlüsselung (Stadtteil-Proxy) */}
             <Section
               title={`Nach Postleitzahl (${detail.byPlz.length} ${
                 detail.byPlz.length === 1 ? "Bezirk" : "Bezirke"
               })`}
             >
               <p className="mb-2 text-[11px] text-stone-500">
-                PLZ entspricht in deutschen Städten meist einem Stadtteil/Bezirk.
+                Reinzoomen blendet die PLZ-Polygone auf der Karte ein.
               </p>
               <div className="overflow-hidden rounded-lg ring-1 ring-stone-200">
                 <table className="w-full text-xs">
@@ -476,6 +610,17 @@ function tooltipHtml(m: Marker, pct: number): string {
       <div>✅ ${m.touched} bearbeitet</div>
       <div style="color:#78716c;margin-top:4px">${escapeHtml(services)}${escapeHtml(more)}</div>
       <div style="margin-top:4px;color:#0c4a6e;font-weight:500">Klick für Details</div>
+    </div>
+  `;
+}
+
+function districtTooltipHtml(d: District, pct: number): string {
+  return `
+    <div style="font-size:12px;line-height:1.4">
+      <div style="font-weight:600;font-size:13px;font-family:monospace">${escapeHtml(d.plz)}</div>
+      <div>📋 ${d.total} Leads</div>
+      <div>📞 ${d.called} angerufen (${Math.round(pct * 100)}%)</div>
+      <div>✅ ${d.touched} bearbeitet</div>
     </div>
   `;
 }
