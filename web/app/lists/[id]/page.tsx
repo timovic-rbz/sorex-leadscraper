@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { use } from "react";
 import {
   LEAD_STATUS_META,
@@ -62,6 +63,8 @@ interface ListResponse {
 
 export default function ListDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
+  const deepLinkUid = searchParams.get("lead");
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openLead, setOpenLead] = useState<DbLead | null>(null);
@@ -72,6 +75,13 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     setHidden(loadHidden());
     setWebsiteFilter(loadWebsiteFilter());
   }, []);
+
+  // Deep-Link aus der Telefonnummern-Suche: ?lead=<uid> → Modal automatisch öffnen
+  useEffect(() => {
+    if (!data || !deepLinkUid) return;
+    const target = data.leads.find((l) => l.uid === deepLinkUid);
+    if (target) setOpenLead(target);
+  }, [data, deepLinkUid]);
 
   function toggleHidden(s: LeadStatus) {
     setHidden((prev) => {

@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
+import { PhoneSearchTrigger } from "./PhoneSearchTrigger";
 import { SessionProvider } from "@/lib/session-context";
 import type { SessionInfo } from "@/lib/types";
 
@@ -24,6 +25,7 @@ export default function Shell({
         {/* pb-24 schafft Platz für die fixe Bottom-Nav auf mobile (60px Nav + Safe-Area) */}
         <main className="flex-1 overflow-x-hidden pb-24 lg:pb-0">{children}</main>
       </div>
+      <PhoneSearchTrigger />
     </SessionProvider>
   );
 }

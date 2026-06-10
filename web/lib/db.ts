@@ -895,6 +895,110 @@ export async function dbCoverage(): Promise<CoverageRow[]> {
 // GEO-CACHE – Lat/Lng für Städte, einmal über Nominatim geholt
 // =============================================================================
 
+// =============================================================================
+// GLOBAL LOOKUP – nach Telefonnummer oder Firmenname suchen
+// =============================================================================
+
+export interface LeadLookupRow {
+  uid: string;
+  firmenname: string;
+  telefon: string;
+  adresse: string;
+  ort: string;
+  dienstleistung: string;
+  leadStatus: string;
+  callCount: number;
+  lastContact: string | null;
+  listId: number | null;
+  listName: string | null;
+  lastSetterName: string | null;
+  lastSetterColor: string | null;
+}
+
+/**
+ * Sucht Leads per Telefonnummer (Format egal) ODER per Firmennamen.
+ *
+ * Telefon-Match: alle Nicht-Ziffern werden aus DB-Spalte und Query gestrippt,
+ * dann LIKE %<digits>%. So matcht +49 212 1234567, 0212 1234567 und
+ * "021212345" alle dieselbe Nummer.
+ *
+ * Plus 0/49-Mapping: wenn die Query mit 0 anfängt, probieren wir auch
+ * "49" + Rest, damit eine eingegebene 02121234567 auch +49212 1234567
+ * findet.
+ */
+export async function dbLookupLeads(query: string): Promise<LeadLookupRow[]> {
+  await ensureSchema();
+  const trimmed = query.trim();
+  if (trimmed.length < 3) return [];
+
+  const digits = trimmed.replace(/\D/g, "");
+  // 0-Prefix (D) → 49-Prefix (international) als zweite Variante mitprobieren
+  const altDigits =
+    digits.length >= 4 && digits.startsWith("0") ? "49" + digits.slice(1) : null;
+  const phoneCandidates = altDigits ? [digits, altDigits] : digits ? [digits] : [];
+
+  const rows = await sql<
+    {
+      uid: string;
+      firmenname: string;
+      telefon: string;
+      adresse: string;
+      ort: string;
+      dienstleistung: string;
+      lead_status: string;
+      call_count: number;
+      last_contact: string | null;
+      list_id: number | null;
+      list_name: string | null;
+      last_setter_name: string | null;
+      last_setter_color: string | null;
+    }[]
+  >`
+    SELECT
+      l.uid,
+      l.firmenname,
+      l.telefon,
+      l.adresse,
+      l.ort,
+      l.dienstleistung,
+      l.lead_status,
+      l.call_count,
+      l.last_contact::text,
+      l.list_id,
+      ls.name AS list_name,
+      s.name  AS last_setter_name,
+      s.color AS last_setter_color
+    FROM leads l
+    LEFT JOIN lists ls   ON ls.id = l.list_id
+    LEFT JOIN setters s  ON s.id  = l.last_setter_id
+    WHERE
+      ${
+        phoneCandidates.length > 0
+          ? sql`regexp_replace(l.telefon, '[^0-9]', '', 'g') ILIKE ANY(${phoneCandidates.map((d) => `%${d}%`)})`
+          : sql`FALSE`
+      }
+      OR l.firmenname ILIKE ${"%" + trimmed + "%"}
+    ORDER BY l.last_seen DESC
+    LIMIT 25
+  `;
+
+  return rows.map((r) => ({
+    uid: r.uid,
+    firmenname: r.firmenname,
+    telefon: r.telefon,
+    adresse: r.adresse,
+    ort: r.ort,
+    dienstleistung: r.dienstleistung,
+    leadStatus: r.lead_status,
+    callCount: r.call_count,
+    lastContact: r.last_contact,
+    listId: r.list_id,
+    listName: r.list_name,
+    lastSetterName: r.last_setter_name,
+    lastSetterColor: r.last_setter_color,
+  }));
+}
+
 export interface CityDetail {
   ort: string;
   byService: Array<{ dienstleistung: string; total: number; called: number; touched: number }>;

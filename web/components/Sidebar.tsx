@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { SessionInfo } from "@/lib/types";
+import { openPhoneSearch } from "./PhoneSearchTrigger";
 
 interface NavItem {
   href: string;
@@ -75,6 +76,19 @@ function DesktopSidebar({
         </div>
         <span className="text-base font-semibold">Soreax Leadscraper</span>
       </Link>
+
+      {/* Globale Telefonnummer-Suche – über allen Nav-Items */}
+      <button
+        onClick={openPhoneSearch}
+        className="mb-2 flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-2 text-left text-xs text-stone-500 transition hover:bg-stone-100"
+        title="Telefonnummer suchen (⌘+K)"
+      >
+        <span className="flex h-6 w-6 items-center justify-center text-base">📞</span>
+        <span className="flex-1">Nummer suchen…</span>
+        <kbd className="rounded border border-stone-200 bg-white px-1 py-0.5 text-[9px] font-medium text-stone-500">
+          ⌘K
+        </kbd>
+      </button>
 
       <nav className="flex flex-1 flex-col gap-1">
         {items.map((item) => {
@@ -192,28 +206,38 @@ function MobileTopBar({
 }) {
   return (
     <header
-      className="sticky top-0 z-30 flex items-center justify-between border-b border-stone-200 bg-white/95 backdrop-blur-md px-4 py-2.5 lg:hidden"
+      className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-stone-200 bg-white/95 backdrop-blur-md px-4 py-2.5 lg:hidden"
       style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.625rem)" }}
     >
       <div className="flex items-center gap-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-sm font-semibold text-white">
           S
         </div>
-        <span className="text-sm font-semibold tracking-tight">Soreax Leadscraper</span>
+        <span className="text-sm font-semibold tracking-tight">Soreax</span>
       </div>
-      {(session.setterName || session.isAdmin) && (
-        <div className="flex items-center gap-2 rounded-full bg-stone-50 px-2 py-1">
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
-            style={{ background: session.setterColor ?? "#525252" }}
-          >
-            {session.setterName ? initials(session.setterName) : "AD"}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={openPhoneSearch}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-base text-stone-700"
+          title="Telefonnummer suchen"
+          aria-label="Telefonnummer suchen"
+        >
+          📞
+        </button>
+        {(session.setterName || session.isAdmin) && (
+          <div className="flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-1">
+            <div
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              style={{ background: session.setterColor ?? "#525252" }}
+            >
+              {session.setterName ? initials(session.setterName) : "AD"}
+            </div>
+            <span className="text-xs font-medium text-stone-700">
+              {session.setterName ?? "Admin"}
+            </span>
           </div>
-          <span className="text-xs font-medium text-stone-700">
-            {session.setterName ?? "Admin"}
-          </span>
-        </div>
-      )}
+        )}
+      </div>
     </header>
   );
 }
