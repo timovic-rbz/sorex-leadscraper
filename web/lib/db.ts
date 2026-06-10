@@ -6,6 +6,7 @@ import type {
   LeadStatus,
   List,
   ListWithStats,
+  QualifiedInfo,
   Setter,
 } from "./types";
 import { LEAD_STATUS_ORDER } from "./types";
@@ -127,6 +128,7 @@ async function runSchema(): Promise<void> {
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_action_at TIMESTAMPTZ`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS qualified_info JSONB`,
     sql`
       CREATE TABLE IF NOT EXISTS lead_events (
         id SERIAL PRIMARY KEY,
@@ -423,6 +425,7 @@ interface DbLeadRow {
   last_setter_id: number | null;
   last_setter_name: string | null;
   last_setter_color: string | null;
+  qualified_info: QualifiedInfo | null;
 }
 
 function rowToDbLead(r: DbLeadRow): DbLead {
@@ -453,11 +456,13 @@ function rowToDbLead(r: DbLeadRow): DbLead {
     lastSetterId: r.last_setter_id ?? null,
     lastSetterName: r.last_setter_name ?? null,
     lastSetterColor: r.last_setter_color ?? null,
+    qualifiedInfo: r.qualified_info ?? null,
   };
 }
 
 const LEAD_SELECT = sql`
   l.*,
+  l.qualified_info,
   s.name  AS last_setter_name,
   s.color AS last_setter_color
 `;
@@ -485,6 +490,31 @@ export async function dbLoadAll(): Promise<DbLead[]> {
   return rows.map(rowToDbLead);
 }
 
+/**
+ * Liefert alle "gesetteten" Leads: Status >= interested.
+ * Sortiert nach letzter Aktivität (last_contact desc) damit die hottest Sachen
+ * oben stehen.
+ */
+export async function dbQualifiedLeads(): Promise<DbLead[]> {
+  await ensureSchema();
+  const rows = await sql<DbLeadRow[]>`
+    SELECT ${LEAD_SELECT}
+    FROM leads l
+    LEFT JOIN setters s ON s.id = l.last_setter_id
+    WHERE l.lead_status IN ('interested', 'call_scheduled', 'won')
+    ORDER BY
+      CASE l.lead_status
+        WHEN 'interested' THEN 1
+        WHEN 'call_scheduled' THEN 2
+        WHEN 'won' THEN 3
+        ELSE 4
+      END,
+      l.last_contact DESC NULLS LAST,
+      l.last_seen DESC
+  `;
+  return rows.map(rowToDbLead);
+}
+
 export async function dbCount(): Promise<number> {
   await ensureSchema();
   const rows = await sql<{ count: string }[]>`
@@ -500,6 +530,7 @@ export interface LeadPatch {
   bumpCallCount?: boolean;
   setLastContact?: boolean;
   listId?: number;
+  qualifiedInfo?: QualifiedInfo;
 }
 
 export async function dbUpdateLead(
@@ -523,6 +554,23 @@ export async function dbUpdateLead(
   if (patch.listId !== undefined) fragments.push(sql`list_id = ${patch.listId}`);
   if (patch.bumpCallCount) fragments.push(sql`call_count = call_count + 1`);
   if (patch.setLastContact) fragments.push(sql`last_contact = NOW()`);
+  if (patch.qualifiedInfo !== undefined) {
+    // JSONB merge: alte Felder beibehalten, neue überschreiben.
+    // sql.json() bindet als nativen JSONB-Wert.
+    // CASE-Fallback: wenn der existierende Wert KEIN Object ist (z.B. Array
+    // aus Legacy-Bug oder NULL), fangen wir bei {} neu an — sonst würde
+    // Postgres' || zwei Arrays konkatenieren statt sauber zu mergen.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const jsonValue = sql.json(patch.qualifiedInfo as any);
+    fragments.push(
+      sql`qualified_info = (
+        CASE WHEN jsonb_typeof(qualified_info) = 'object'
+          THEN qualified_info
+          ELSE '{}'::jsonb
+        END
+      ) || ${jsonValue}`,
+    );
+  }
 
   // Setter merken, sobald er irgendwas am Lead bewegt
   if (setterId !== null && (patch.leadStatus !== undefined || patch.bumpCallCount || patch.setLastContact)) {

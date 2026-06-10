@@ -64,6 +64,19 @@ export interface ListWithStats extends List {
   byStatus: Record<LeadStatus, number>;
 }
 
+export interface QualifiedInfo {
+  ansprechpartner?: string;
+  position?: string;
+  istEntscheider?: boolean;
+  erreichbarkeit?: string;
+  bedarf?: string;
+  budget?: string;
+  konkurrenz?: string;
+  demoTermin?: string | null;
+  unterlagen?: string;
+  naechsteSchritte?: string;
+}
+
 export interface DbLeadCrm {
   leadStatus: LeadStatus;
   notes: string;
@@ -76,6 +89,7 @@ export interface DbLeadCrm {
   lastSetterId: number | null;
   lastSetterName: string | null;
   lastSetterColor: string | null;
+  qualifiedInfo: QualifiedInfo | null;
 }
 
 export interface Setter {
