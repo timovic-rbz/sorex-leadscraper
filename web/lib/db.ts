@@ -501,14 +501,16 @@ export async function dbQualifiedLeads(): Promise<DbLead[]> {
     SELECT ${LEAD_SELECT}
     FROM leads l
     LEFT JOIN setters s ON s.id = l.last_setter_id
-    WHERE l.lead_status IN ('interested', 'call_scheduled', 'won')
+    WHERE l.lead_status IN ('follow_up', 'interested', 'call_scheduled', 'won')
     ORDER BY
       CASE l.lead_status
-        WHEN 'interested' THEN 1
-        WHEN 'call_scheduled' THEN 2
-        WHEN 'won' THEN 3
-        ELSE 4
+        WHEN 'follow_up' THEN 1
+        WHEN 'interested' THEN 2
+        WHEN 'call_scheduled' THEN 3
+        WHEN 'won' THEN 4
+        ELSE 5
       END,
+      l.next_action_at ASC NULLS LAST,
       l.last_contact DESC NULLS LAST,
       l.last_seen DESC
   `;

@@ -9,9 +9,9 @@ import {
   type QualifiedInfo,
 } from "@/lib/types";
 
-type QualifiedStatus = "interested" | "call_scheduled" | "won";
+type QualifiedStatus = "follow_up" | "interested" | "call_scheduled" | "won";
 
-const COLUMN_ORDER: QualifiedStatus[] = ["interested", "call_scheduled", "won"];
+const COLUMN_ORDER: QualifiedStatus[] = ["follow_up", "interested", "call_scheduled", "won"];
 
 export default function QualifiedPage() {
   const [leads, setLeads] = useState<DbLead[] | null>(null);
@@ -35,13 +35,14 @@ export default function QualifiedPage() {
 
   const grouped = useMemo(() => {
     const g: Record<QualifiedStatus, DbLead[]> = {
+      follow_up: [],
       interested: [],
       call_scheduled: [],
       won: [],
     };
     for (const l of leads ?? []) {
       const s = (l.leadStatus ?? "new") as LeadStatus;
-      if (s === "interested" || s === "call_scheduled" || s === "won") {
+      if (s === "follow_up" || s === "interested" || s === "call_scheduled" || s === "won") {
         g[s].push(l);
       }
     }
@@ -85,7 +86,7 @@ export default function QualifiedPage() {
       )}
 
       {leads && leads.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {COLUMN_ORDER.map((s) => {
             const meta = LEAD_STATUS_META[s];
             const list = grouped[s];
@@ -176,11 +177,24 @@ function QualifiedCard({ lead, onClick }: { lead: DbLead; onClick: () => void })
         </div>
       )}
 
-      {q?.demoTermin && (
-        <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-700">
-          📅 Demo: {new Date(q.demoTermin).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
-        </div>
-      )}
+      {/* Termin-Chips: erst Demo-Termin, dann Wiedervorlage/Call-Termin */}
+      <div className="mt-1 flex flex-wrap gap-1">
+        {q?.demoTermin && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-700">
+            📅 Demo: {new Date(q.demoTermin).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+          </span>
+        )}
+        {lead.nextActionAt && lead.leadStatus === "follow_up" && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-cyan-50 px-1.5 py-0.5 text-[11px] font-medium text-cyan-700">
+            🔄 Wiedervorlage: {new Date(lead.nextActionAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+          </span>
+        )}
+        {lead.nextActionAt && lead.leadStatus === "call_scheduled" && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-700">
+            📅 Termin: {new Date(lead.nextActionAt).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
+          </span>
+        )}
+      </div>
 
       {next && (
         <div className="mt-1.5 line-clamp-2 text-[11px] text-stone-600">

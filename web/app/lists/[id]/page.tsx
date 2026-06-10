@@ -115,7 +115,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
   const grouped = useMemo(() => {
     const g: Record<LeadStatus, DbLead[]> = {
-      new: [], no_answer: [], interested: [], call_scheduled: [],
+      new: [], no_answer: [], follow_up: [], interested: [], call_scheduled: [],
       won: [], not_interested: [], lost: [],
     };
     if (!data) return g;
@@ -482,10 +482,17 @@ function LeadModal({
 
   async function scheduleCall() {
     if (!nextActionAt) {
-      setErrorMsg("Bitte Wiedervorlage-Datum wählen");
+      setErrorMsg("Bitte Termin-Datum wählen");
       return;
     }
     await setStatus("call_scheduled", { nextActionAt: new Date(nextActionAt).toISOString() });
+  }
+
+  async function scheduleFollowUp() {
+    // Wiedervorlage: Status setzen, Datum ist optional (sonst "irgendwann später")
+    const extra: Record<string, unknown> = {};
+    if (nextActionAt) extra.nextActionAt = new Date(nextActionAt).toISOString();
+    await setStatus("follow_up", extra);
   }
 
   const currentMeta = LEAD_STATUS_META[lead.leadStatus ?? "new"];
@@ -566,9 +573,12 @@ function LeadModal({
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
           <div className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500">📞 Anruf-Resultat</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <StatusButton color="bg-yellow-500 hover:bg-yellow-600" onClick={() => setStatus("no_answer")} disabled={busy}>
               📵 Nicht erreicht
+            </StatusButton>
+            <StatusButton color="bg-cyan-600 hover:bg-cyan-700" onClick={scheduleFollowUp} disabled={busy}>
+              🔄 Wiedervorlage
             </StatusButton>
             <StatusButton color="bg-orange-500 hover:bg-orange-600" onClick={() => setStatus("interested")} disabled={busy}>
               🔥 Interessiert
@@ -582,7 +592,13 @@ function LeadModal({
           </div>
 
           <div className="mt-5">
-            <div className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500">📅 Folge-Call vereinbaren</div>
+            <div className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500">
+              📅 Wiedervorlage / Folge-Call planen
+            </div>
+            <p className="-mt-1 mb-2 text-[11px] text-stone-500">
+              Datum optional — wird für <em>Wiedervorlage</em> als Erinnerung gespeichert
+              und ist für <em>Call vereinbart</em> Pflicht.
+            </p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex-1 min-w-[200px]">
                 <label className="label-base">Termin</label>
@@ -593,6 +609,13 @@ function LeadModal({
                   className="input-base"
                 />
               </div>
+              <button
+                onClick={scheduleFollowUp}
+                disabled={busy}
+                className="rounded-full bg-cyan-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                🔄 Wiedervorlage
+              </button>
               <button onClick={scheduleCall} disabled={busy} className="rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50">
                 📅 Call vereinbart
               </button>

@@ -3,6 +3,7 @@ export type Source = "osm" | "google";
 export type LeadStatus =
   | "new"
   | "no_answer"
+  | "follow_up"
   | "not_interested"
   | "interested"
   | "call_scheduled"
@@ -12,6 +13,7 @@ export type LeadStatus =
 export const LEAD_STATUS_ORDER: LeadStatus[] = [
   "new",
   "no_answer",
+  "follow_up",
   "interested",
   "call_scheduled",
   "won",
@@ -22,6 +24,7 @@ export const LEAD_STATUS_ORDER: LeadStatus[] = [
 export const LEAD_STATUS_META: Record<LeadStatus, { label: string; emoji: string; color: string }> = {
   new:             { label: "Neu",              emoji: "🆕", color: "bg-blue-600" },
   no_answer:       { label: "Nicht erreicht",   emoji: "📵", color: "bg-yellow-600" },
+  follow_up:       { label: "Wiedervorlage",    emoji: "🔄", color: "bg-cyan-600" },
   interested:      { label: "Interessiert",     emoji: "🔥", color: "bg-orange-600" },
   call_scheduled:  { label: "Call vereinbart",  emoji: "📅", color: "bg-purple-600" },
   won:             { label: "Kunde",            emoji: "🏆", color: "bg-green-600" },
