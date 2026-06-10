@@ -10,6 +10,7 @@ import {
   type LeadStatus,
   type List,
 } from "@/lib/types";
+import { GoogleProfileButton } from "@/components/GoogleProfileButton";
 
 const HIDDEN_STATUSES_KEY = "lead-board:hidden-statuses";
 const WEBSITE_FILTER_KEY = "lead-board:website-filter";
@@ -317,13 +318,24 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
   const noWebsite = !lead.webseite;
   const today = parseTodayHours(lead.oeffnungszeiten);
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="cursor-pointer rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-200"
     >
-      {/* Name – darf 2 Zeilen brauchen, danach Ellipsis */}
-      <div className="line-clamp-2 font-semibold leading-snug text-stone-900">
-        {lead.firmenname}
+      {/* Name – darf 2 Zeilen brauchen, danach Ellipsis. G-Button rechts daneben. */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="line-clamp-2 flex-1 font-semibold leading-snug text-stone-900">
+          {lead.firmenname}
+        </div>
+        <GoogleProfileButton name={lead.firmenname} ort={lead.ort} size="sm" />
       </div>
 
       {/* Telefon: ganze Zeile, Whitespace nicht brechen */}
@@ -381,7 +393,7 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
           von {lead.lastSetterName}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -521,9 +533,15 @@ function LeadModal({
               📞 Keine Telefonnummer vorhanden
             </div>
           )}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <ContactPill href={lead.email ? `mailto:${lead.email}` : undefined} icon="✉️" label={lead.email || "Keine E-Mail"} disabled={!lead.email} />
             <ContactPill href={lead.webseite || undefined} icon="🌐" label="Webseite" external disabled={!lead.webseite} />
+            <ContactPill
+              href={`https://www.google.com/search?q=${encodeURIComponent([lead.firmenname, lead.ort].filter(Boolean).join(" "))}`}
+              icon="🅖"
+              label="Google-Profil"
+              external
+            />
             <ContactPill href={lead.googleMaps || undefined} icon="🗺" label="Maps" external disabled={!lead.googleMaps} />
           </div>
         </div>

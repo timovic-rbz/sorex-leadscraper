@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Lead, List, SearchResponse, Source } from "@/lib/types";
+import { GoogleProfileButton } from "@/components/GoogleProfileButton";
 
 type TabId = "single" | "bulk";
 type LeadWithStatus = Lead & { dbStatus: "neu" | "bekannt" };
@@ -671,7 +672,12 @@ function LeadsTable({ leads }: { leads: LeadWithStatus[] }) {
           {leads.map((l) => (
             <tr key={l.uid} className="border-t border-stone-100 hover:bg-stone-50/50">
               <td className="px-5 py-3">{l.dbStatus === "neu" ? "🆕" : "🔁"}</td>
-              <td className="px-5 py-3 font-medium">{l.firmenname}</td>
+              <td className="px-5 py-3 font-medium">
+                <div className="flex items-center gap-2">
+                  <span className="truncate">{l.firmenname}</span>
+                  <GoogleProfileButton name={l.firmenname} ort={l.ort} size="sm" />
+                </div>
+              </td>
               <td className="px-5 py-3">{l.telefon && <a className="text-rose-600 hover:underline" href={`tel:${l.telefon}`}>{l.telefon}</a>}</td>
               <td className="px-5 py-3">{l.email && <a className="text-rose-600 hover:underline" href={`mailto:${l.email}`}>{l.email}</a>}</td>
               <td className="px-5 py-3">
