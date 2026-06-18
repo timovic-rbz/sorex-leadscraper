@@ -285,16 +285,30 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
-      {openLead && (
-        <LeadModal
-          lead={openLead}
-          onClose={() => setOpenLead(null)}
-          onSaved={() => {
-            setOpenLead(null);
-            reload();
-          }}
-        />
-      )}
+      {openLead && (() => {
+        // Durchlauf-Modus: Queue = die Leads der Spalte, aus der dieser Lead
+        // geöffnet wurde (in Anzeige-Reihenfolge, inkl. aktivem Website-Filter).
+        const queueStatus = (openLead.leadStatus ?? "new") as LeadStatus;
+        const queue = grouped[queueStatus] ?? [];
+        const queueIndex = queue.findIndex((l) => l.uid === openLead.uid);
+        const nextLead = queueIndex >= 0 ? queue[queueIndex + 1] ?? null : null;
+        return (
+          <LeadModal
+            key={openLead.uid}
+            lead={openLead}
+            queuePosition={queueIndex >= 0 ? queueIndex + 1 : null}
+            queueTotal={queue.length}
+            nextName={nextLead?.firmenname ?? null}
+            onClose={() => setOpenLead(null)}
+            onSaved={(advance) => {
+              // Board im Hintergrund neu laden (Counts aktualisieren),
+              // dann entweder zum nächsten Lead springen oder schließen.
+              reload();
+              setOpenLead(advance && nextLead ? nextLead : null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -427,12 +441,19 @@ function parseTodayHours(raw: string | null | undefined): { label: string; close
 
 function LeadModal({
   lead,
+  queuePosition,
+  queueTotal,
+  nextName,
   onClose,
   onSaved,
 }: {
   lead: DbLead;
+  queuePosition: number | null;
+  queueTotal: number;
+  nextName: string | null;
   onClose: () => void;
-  onSaved: () => void;
+  /** advance=true → nach Status-Aktion zum nächsten Lead springen statt schließen. */
+  onSaved: (advance: boolean) => void;
 }) {
   const [notes, setNotes] = useState(lead.notes ?? "");
   const [nextActionAt, setNextActionAt] = useState(
@@ -472,12 +493,12 @@ function LeadModal({
     };
     if (status === "no_answer") body.bumpCallCount = true;
     const ok = await patch(body);
-    if (ok) onSaved();
+    if (ok) onSaved(true); // Status geändert → weiter zum nächsten Lead
   }
 
   async function saveNotesOnly() {
     const ok = await patch({ notes, nextActionAt: nextActionAt ? new Date(nextActionAt).toISOString() : null });
-    if (ok) onSaved();
+    if (ok) onSaved(false); // nur Notiz gespeichert → Fenster schließen, nicht springen
   }
 
   async function scheduleCall() {
@@ -507,6 +528,11 @@ function LeadModal({
         <div className="flex items-start justify-between gap-4 border-b border-stone-100 p-6">
           <div className="flex-1 min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2">
+              {queuePosition && queueTotal > 1 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-100 tabular-nums">
+                  📋 {queuePosition} / {queueTotal}
+                </span>
+              )}
               <span className={`inline-flex items-center gap-1.5 rounded-full ${currentMeta.color} px-3 py-1 text-xs font-medium text-white`}>
                 {currentMeta.emoji} {currentMeta.label}
               </span>
@@ -590,6 +616,21 @@ function LeadModal({
               ❌ Kein Interesse
             </StatusButton>
           </div>
+
+          {/* Durchlauf-Hinweis: kündigt das automatische Weiterspringen an */}
+          {nextName ? (
+            <p className="mt-3 text-[11px] text-stone-500">
+              Nach der Auswahl geht es direkt weiter zu{" "}
+              <span className="font-medium text-stone-700">{nextName}</span>
+              {queuePosition && queueTotal > 0 && (
+                <span className="text-stone-400"> · noch {queueTotal - queuePosition} in dieser Spalte</span>
+              )}
+            </p>
+          ) : queuePosition && queueTotal > 1 ? (
+            <p className="mt-3 text-[11px] text-stone-500">
+              Letzter Lead in dieser Spalte — danach schließt sich das Fenster.
+            </p>
+          ) : null}
 
           <div className="mt-5">
             <div className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500">
