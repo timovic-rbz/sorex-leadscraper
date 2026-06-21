@@ -58,32 +58,6 @@ export interface LeadWithDbStatus extends Lead {
 }
 
 /**
- * Erweiterte Google-Business-Profil-Daten, die on-demand über DataForSEO
- * (Business Data "My Business Info") nachgeladen werden – mehr als die
- * Trefferliste liefert.
- */
-export interface BusinessProfile {
-  /** Ob das Google-Profil vom Inhaber beansprucht wurde (null = unbekannt). */
-  isClaimed: boolean | null;
-  description: string;
-  category: string;
-  additionalCategories: string[];
-  /** Ausgestattete Merkmale (z.B. "Rollstuhlgerecht", "WLAN", "Termin nötig"). */
-  attributes: string[];
-  /** Häufige Themen aus Bewertungen. */
-  placeTopics: { topic: string; count: number }[];
-  ratingValue: number | null;
-  ratingVotes: number | null;
-  /** Anzahl Bewertungen je Sternzahl ("1".."5"). */
-  ratingDistribution: Record<string, number> | null;
-  totalPhotos: number | null;
-  priceLevel: string;
-  bookOnlineUrl: string;
-  contactUrl: string;
-  mainImage: string;
-}
-
-/**
  * Website-Qualitäts-Check über DataForSEO (OnPage Instant Pages + Lighthouse).
  * Beantwortet: gibt es eine Website, wie gut ist sie technisch/SEO-seitig
  * optimiert. Felder sind null, wenn die jeweilige Analyse fehlschlug.
@@ -167,9 +141,6 @@ export interface CompetitorCheck {
  * einmal bezahlt – erneutes Öffnen liest aus dem Cache.
  */
 export interface LeadEnrichment {
-  profile?: BusinessProfile;
-  /** ISO-Zeitpunkt, wann das Profil geladen wurde. */
-  profileAt?: string;
   website?: WebsiteCheck;
   /** ISO-Zeitpunkt, wann der Website-Check lief. */
   websiteAt?: string;

@@ -1,6 +1,5 @@
 import postgres from "postgres";
 import type {
-  BusinessProfile,
   CommissionSummary,
   CompetitorCheck,
   DbLead,
@@ -641,11 +640,6 @@ async function mergeEnrichment(uid: string, patch: Partial<LeadEnrichment>): Pro
     ) || ${jsonValue}
     WHERE uid = ${uid}
   `;
-}
-
-export async function dbSaveLeadProfile(uid: string, profile: BusinessProfile): Promise<void> {
-  await ensureSchema();
-  await mergeEnrichment(uid, { profile, profileAt: new Date().toISOString() });
 }
 
 export async function dbSaveLeadWebsite(uid: string, website: WebsiteCheck): Promise<void> {
