@@ -208,6 +208,7 @@ interface ProviderUsage {
 
 const PROVIDER_META: Record<string, { name: string; unit: string; icon: string }> = {
   google_places: { name: "Google Places", unit: "Adressen", icon: "🗺️" },
+  dataforseo: { name: "DataForSEO", unit: "Maps-Treffer", icon: "🔎" },
   anthropic: { name: "Anthropic (Claude)", unit: "Tokens", icon: "🤖" },
   openai: { name: "OpenAI (GPT)", unit: "Tokens", icon: "💬" },
 };

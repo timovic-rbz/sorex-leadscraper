@@ -1,4 +1,4 @@
-export type Source = "osm" | "google";
+export type Source = "osm" | "google" | "dataforseo";
 
 export type LeadStatus =
   | "new"

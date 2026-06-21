@@ -29,6 +29,17 @@ export const PROVIDERS: Provider[] = [
     patternHint: "Nur Buchstaben, Zahlen, Unterstrich, Bindestrich. Kein Whitespace.",
   },
   {
+    id: "dataforseo",
+    name: "DataForSEO API",
+    purpose: "Lead-Daten aus Google Maps (Scraping-API, Alternative zu Google Places)",
+    description:
+      "Holt Firmenname, Telefon, Adresse, Website, Bewertung & Öffnungszeiten aus Google Maps über DataForSEO. Günstig bei großen Mengen (~0,2 ct pro Suche). WICHTIG: DataForSEO nutzt Login + Passwort (Basic-Auth), keinen einzelnen Key – hier im Format login:passwort eintragen.",
+    docsUrl: "https://app.dataforseo.com/api-access",
+    placeholder: "login@mail.com:dein_passwort",
+    keyPattern: /^[^\s:]+:[^\s]+$/,
+    patternHint: "Format login:passwort (mit Doppelpunkt getrennt, ohne Leerzeichen/Zeilenumbruch).",
+  },
+  {
     id: "anthropic",
     name: "Anthropic API (Claude)",
     purpose: "KI-Lead-Qualifizierung (Webseiten-Score, Pitch-Vorschläge)",

@@ -166,12 +166,23 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
   URL.revokeObjectURL(a.href);
 }
 
+// Wählbare Lead-Quellen. OSM ist absichtlich nicht dabei (Rate-Limit-Frust),
+// bleibt aber im Typ/DB-Schema, damit alte Leads "source=osm" gültig bleiben.
+const SOURCE_OPTIONS: { id: Source; label: string }[] = [
+  { id: "google", label: "🔵 Google Places" },
+  { id: "dataforseo", label: "🔎 DataForSEO" },
+];
+// Max. Leads pro Suche je Quelle: Google Places hart bei 60 (3×20 Pages),
+// DataForSEO pro Maps-Call bis 100, OSM großzügig.
+const SOURCE_CAP: Record<Source, number> = { google: 60, dataforseo: 100, osm: 200 };
+
+function sourceLabel(source: Source): string {
+  return SOURCE_OPTIONS.find((o) => o.id === source)?.label ?? source;
+}
+
 // ---------- main page ----------
 export default function Page() {
-  // Quelle fix auf Google Places — OSM-Toggle wurde entfernt (Rate-Limit-Frust,
-  // bei zu vielen 429/504). Die Source-Prop bleibt im DB-Schema + APIs erhalten,
-  // damit alte Leads weiterhin "source=osm" sein dürfen.
-  const source: Source = "google";
+  const [source, setSource] = useState<Source>("google");
   const [scrapeEmails, setScrapeEmails] = useState(true);
   const [tab, setTab] = useState<TabId>("single");
 
@@ -183,12 +194,30 @@ export default function Page() {
           <p className="mt-2 text-sm text-stone-500">Daten ziehen, in eine Liste speichern, dann unter <a href="/lists" className="text-rose-600 hover:underline">Listen</a> abarbeiten.</p>
         </div>
         <div className="hidden gap-2 sm:flex">
-          <span className="pill">🔵 Google Places</span>
+          <span className="pill">{sourceLabel(source)}</span>
           <span className="pill">{scrapeEmails ? "📧 E-Mail an" : "📧 E-Mail aus"}</span>
         </div>
       </header>
 
-      <section className="card mb-6 flex flex-wrap items-center gap-4 px-5 py-4">
+      <section className="card mb-6 flex flex-wrap items-center gap-x-6 gap-y-4 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-stone-600">Quelle</span>
+          <div className="inline-flex rounded-full bg-stone-100 p-1">
+            {SOURCE_OPTIONS.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => setSource(o.id)}
+                className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                  source === o.id
+                    ? "bg-white text-stone-900 shadow-sm"
+                    : "text-stone-500 hover:text-stone-700"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm">
           <input type="checkbox" checked={scrapeEmails} onChange={(e) => setScrapeEmails(e.target.checked)} className="h-4 w-4 accent-rose-600" />
           <span>E-Mails von Webseiten crawlen</span>
@@ -265,11 +294,11 @@ function SingleTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boo
           <Field label="Ort" value={ort} onChange={setOrt} placeholder="z.B. Düsseldorf" />
           <Field label="Dienstleistung" value={dl} onChange={setDl} placeholder="z.B. Kosmetik" />
           <NumberField
-            label={`Max. Leads ${source === "google" ? "(max 60)" : "(max 200)"}`}
+            label={`Max. Leads (max ${SOURCE_CAP[source]})`}
             value={maxResults}
             onChange={setMaxResults}
             min={5}
-            max={source === "google" ? 60 : 200}
+            max={SOURCE_CAP[source]}
             step={5}
           />
           <div className="flex items-end">
@@ -407,11 +436,11 @@ function BulkTab({ source, scrapeEmails }: { source: Source; scrapeEmails: boole
           <TextField label={`Orte – ${orte.length}`} value={orteText} onChange={setOrteText} placeholder={"Düsseldorf\nKöln\nLangenfeld"} rows={6} />
           <TextField label={`Dienstleistungen – ${dls.length}`} value={dlText} onChange={setDlText} placeholder={"Kosmetik\nFriseur"} rows={6} />
           <NumberField
-            label={`Max pro Suche ${source === "google" ? "(max 60)" : "(max 200)"}`}
+            label={`Max pro Suche (max ${SOURCE_CAP[source]})`}
             value={maxResults}
             onChange={setMaxResults}
             min={5}
-            max={source === "google" ? 60 : 200}
+            max={SOURCE_CAP[source]}
             step={5}
           />
         </div>

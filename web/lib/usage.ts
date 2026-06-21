@@ -18,6 +18,9 @@ const GOOGLE_TEXT_SEARCH_USD = 0.032;
 // Google Places "Place Details (New)" — wird hier aktuell NICHT genutzt, nur als Referenz
 // const GOOGLE_PLACE_DETAILS_USD = 0.017;
 
+// DataForSEO "Google Maps SERP – Live Advanced" — ~$0.002 pro Request (bis 100 Treffer)
+const DATAFORSEO_MAPS_USD = 0.002;
+
 // Anthropic Claude (Sonnet 4.5) — Input/Output in USD pro 1M Tokens
 const ANTHROPIC_INPUT_USD_PER_MTOK = 3.0;
 const ANTHROPIC_OUTPUT_USD_PER_MTOK = 15.0;
@@ -32,6 +35,15 @@ export async function recordGooglePlacesTextSearch(placesReturned: number): Prom
     "text_search",
     placesReturned,
     GOOGLE_TEXT_SEARCH_USD * USD_TO_EUR,
+  );
+}
+
+export async function recordDataForSeoMapsSearch(itemsReturned: number): Promise<void> {
+  await dbRecordUsage(
+    "dataforseo",
+    "maps_search",
+    itemsReturned,
+    DATAFORSEO_MAPS_USD * USD_TO_EUR,
   );
 }
 
@@ -55,6 +67,7 @@ export async function recordOpenAICall(inputTokens: number, outputTokens: number
  */
 export const PROVIDER_LABELS: Record<string, { name: string; unit: string; icon: string }> = {
   google_places: { name: "Google Places", unit: "Adressen", icon: "🗺️" },
+  dataforseo: { name: "DataForSEO", unit: "Maps-Treffer", icon: "🔎" },
   anthropic: { name: "Anthropic (Claude)", unit: "Tokens", icon: "🤖" },
   openai: { name: "OpenAI (GPT)", unit: "Tokens", icon: "💬" },
 };

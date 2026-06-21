@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SearchRequest, Lead } from "@/lib/types";
 import { searchOsm } from "@/lib/osm";
 import { searchGoogle } from "@/lib/google-places";
+import { searchDataForSeo } from "@/lib/dataforseo";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -23,9 +24,10 @@ export async function POST(req: Request) {
 
   const { ort, dienstleistung, source } = body;
   // Source-spezifisches Cap: Google Places API kann max 60 pro Text-Query
-  // (3 Pages × 20, harte Grenze). OSM hat kein Limit; 200 ist freiwilliger
-  // Schutz vor Overpass-Überlast und endlosem Email-Crawl.
-  const sourceCap = source === "google" ? 60 : 200;
+  // (3 Pages × 20, harte Grenze). DataForSEO Maps berechnen wir pro Call bis
+  // 100 Treffer (depth). OSM hat kein Limit; 200 ist freiwilliger Schutz vor
+  // Overpass-Überlast und endlosem Email-Crawl.
+  const sourceCap = source === "google" ? 60 : source === "dataforseo" ? 100 : 200;
   const maxResults = Math.min(sourceCap, Math.max(5, Number(body.maxResults) || 20));
   if (!ort || !dienstleistung) {
     return NextResponse.json({ error: "ort und dienstleistung sind Pflicht" }, { status: 400 });
@@ -35,7 +37,9 @@ export async function POST(req: Request) {
     const leads: Lead[] =
       source === "google"
         ? await searchGoogle(dienstleistung, ort, maxResults)
-        : await searchOsm(dienstleistung, ort, maxResults);
+        : source === "dataforseo"
+          ? await searchDataForSeo(dienstleistung, ort, maxResults)
+          : await searchOsm(dienstleistung, ort, maxResults);
 
     return NextResponse.json({
       leads,
