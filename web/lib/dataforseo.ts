@@ -2,6 +2,7 @@ import type {
   CompetitorCheck,
   Lead,
   MarketCheck,
+  RankedKeyword,
   ReviewItem,
   WebsiteCheck,
 } from "./types";
@@ -10,6 +11,7 @@ import {
   recordDataForSeoLighthouse,
   recordDataForSeoMapsSearch,
   recordDataForSeoOnPage,
+  recordDataForSeoRankedKeywords,
   recordDataForSeoReviews,
   recordDataForSeoSearchVolume,
   recordDataForSeoSerp,
@@ -27,6 +29,9 @@ const SEARCH_VOLUME_URL =
 // Reviews (task-basiert: erst posten, dann pollen).
 const REVIEWS_POST_URL = "https://api.dataforseo.com/v3/business_data/google/reviews/task_post";
 const REVIEWS_GET_URL = "https://api.dataforseo.com/v3/business_data/google/reviews/task_get";
+// Keywords, für die eine Domain bei Google rankt (DataForSEO Labs).
+const RANKED_KEYWORDS_URL =
+  "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live";
 // location_code für Deutschland (DataForSEO-Standortkatalog).
 const LOCATION_CODE_DE = 2276;
 
@@ -690,4 +695,73 @@ export async function getReviewsTask(id: string): Promise<{ ready: boolean; revi
   }));
   void recordDataForSeoReviews(reviews.length);
   return { ready: true, reviews };
+}
+
+// =============================================================================
+// RANKED KEYWORDS – für welche Keywords rankt die Domain (DataForSEO Labs)
+// =============================================================================
+
+interface DfsRankedItem {
+  keyword_data?: { keyword?: string; keyword_info?: { search_volume?: number | null } };
+  ranked_serp_element?: {
+    serp_item?: { rank_group?: number; rank_absolute?: number; type?: string };
+  };
+}
+interface DfsRankedResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: { items?: DfsRankedItem[] }[] | null;
+  }[];
+}
+
+/**
+ * Keywords, für die eine Domain bei Google organisch rankt – sortiert nach
+ * Suchvolumen. Nur sinnvoll für optimierte Seiten (UI gated das auf onpage_score).
+ */
+export async function getRankedKeywords(rawUrl: string): Promise<RankedKeyword[]> {
+  const target = rawUrl
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+  if (!target) throw new Error("Keine gültige Domain für Ranked Keywords.");
+
+  const headers = { Authorization: await authHeader(), "Content-Type": "application/json" };
+  const r = await fetch(RANKED_KEYWORDS_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([
+      {
+        target,
+        language_code: "de",
+        location_code: LOCATION_CODE_DE,
+        limit: 50,
+        order_by: ["keyword_data.keyword_info.search_volume,desc"],
+      },
+    ]),
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO Ranked Keywords", r);
+  const data = (await r.json()) as DfsRankedResponse;
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) {
+    throw new Error(`DataForSEO Ranked Keywords: ${task?.status_message ?? "Fehler"}`);
+  }
+  void recordDataForSeoRankedKeywords();
+
+  const items = task.result?.[0]?.items ?? [];
+  return items
+    .map((i) => {
+      const serp = i.ranked_serp_element?.serp_item;
+      return {
+        keyword: i.keyword_data?.keyword ?? "",
+        position: serp?.rank_group ?? serp?.rank_absolute ?? 0,
+        searchVolume: i.keyword_data?.keyword_info?.search_volume ?? null,
+        type: serp?.type,
+      };
+    })
+    .filter((k) => k.keyword && k.position > 0 && (k.type === undefined || k.type === "organic"))
+    .map(({ keyword, position, searchVolume }) => ({ keyword, position, searchVolume }))
+    .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
+    .slice(0, 25);
 }

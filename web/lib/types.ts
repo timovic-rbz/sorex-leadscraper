@@ -111,6 +111,15 @@ export interface ReviewItem {
   author: string;
 }
 
+/** Ein Keyword, für das die Website bei Google rankt. */
+export interface RankedKeyword {
+  keyword: string;
+  /** Organische Position. */
+  position: number;
+  /** Monatliches Suchvolumen (null = unbekannt). */
+  searchVolume: number | null;
+}
+
 /** Ein Mitbewerber aus dem lokalen Google-Maps-Umfeld. */
 export interface Competitor {
   name: string;
@@ -150,6 +159,8 @@ export interface LeadEnrichment {
   reviewsAt?: string;
   competitors?: CompetitorCheck;
   competitorsAt?: string;
+  rankedKeywords?: RankedKeyword[];
+  rankedKeywordsAt?: string;
 }
 
 export interface List {

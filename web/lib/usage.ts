@@ -36,6 +36,9 @@ const DATAFORSEO_SEARCH_VOLUME_USD = 0.05;
 // DataForSEO "Business Data – Google Reviews" — ~$0.0008 pro 10 Reviews
 const DATAFORSEO_REVIEWS_USD = 0.0008;
 
+// DataForSEO "Labs – Ranked Keywords Live" — ~$0.02 pro Request
+const DATAFORSEO_RANKED_KEYWORDS_USD = 0.02;
+
 // Anthropic Claude (Sonnet 4.5) — Input/Output in USD pro 1M Tokens
 const ANTHROPIC_INPUT_USD_PER_MTOK = 3.0;
 const ANTHROPIC_OUTPUT_USD_PER_MTOK = 15.0;
@@ -82,6 +85,10 @@ export async function recordDataForSeoReviews(reviewsReturned: number): Promise<
   // Abrechnung pro 10 Reviews.
   const units = Math.max(1, Math.ceil(reviewsReturned / 10));
   await dbRecordUsage("dataforseo", "reviews", reviewsReturned, units * DATAFORSEO_REVIEWS_USD * USD_TO_EUR);
+}
+
+export async function recordDataForSeoRankedKeywords(): Promise<void> {
+  await dbRecordUsage("dataforseo", "ranked_keywords", 1, DATAFORSEO_RANKED_KEYWORDS_USD * USD_TO_EUR);
 }
 
 export async function recordAnthropicCall(inputTokens: number, outputTokens: number): Promise<void> {

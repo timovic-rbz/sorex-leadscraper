@@ -13,6 +13,7 @@ import {
   type LeadStatus,
   type List,
   type MarketCheck,
+  type RankedKeyword,
   type ReviewItem,
   type WebsiteCheck,
 } from "@/lib/types";
@@ -854,17 +855,8 @@ function LeadModal({
           <InfoPanel label="Wiedervorlage" value={lead.nextActionAt ? new Date(lead.nextActionAt).toLocaleDateString("de-DE") : "—"} />
         </div>
 
-        {/* DataForSEO Website-Check (on-demand, gecacht) */}
-        <WebsiteCheckSection lead={lead} initial={enrichment?.website ?? null} />
-
-        {/* DataForSEO Ranking & Markt (on-demand, gecacht) */}
-        <MarketCheckSection lead={lead} initial={enrichment?.market ?? null} />
-
-        {/* DataForSEO Konkurrenz-Vergleich (on-demand, gecacht) */}
-        <CompetitorsSection lead={lead} initial={enrichment?.competitors ?? null} />
-
-        {/* DataForSEO negative Reviews (on-demand, gecacht) */}
-        <ReviewsSection lead={lead} initial={enrichment?.reviews ?? null} />
+        {/* DataForSEO-Insights – einklappbares Akkordeon (einzeln + alle) */}
+        <InsightsPanel lead={lead} enrichment={enrichment} />
 
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
@@ -1035,15 +1027,103 @@ async function enrichOne(lead: DbLead): Promise<void> {
 }
 
 // ============================================================================
+// Akkordeon: DataForSEO-Insights ein-/ausklappbar (einzeln + alle zusammen)
+// ============================================================================
+
+function ChevronToggle({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${open ? "rotate-90" : ""}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+/** Einzeln einklappbare Sektion mit Titel, optionalem Header-Button und Lade-Punkt. */
+function CollapsibleSection({
+  title,
+  loaded,
+  defaultOpen = false,
+  headerRight,
+  children,
+}: {
+  title: string;
+  loaded?: boolean;
+  defaultOpen?: boolean;
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-t border-stone-100">
+      <div className="flex items-center justify-between gap-2 px-6 py-3">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 items-center gap-2 text-left"
+        >
+          <ChevronToggle open={open} />
+          <span className="text-xs font-medium uppercase tracking-wide text-stone-500">{title}</span>
+          {loaded && (
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="geladen" aria-hidden />
+          )}
+        </button>
+        {open && headerRight}
+      </div>
+      {open && <div className="px-6 pb-5">{children}</div>}
+    </div>
+  );
+}
+
+/** Master-Container: kann ALLE DataForSEO-Sektionen auf einmal ein-/ausklappen. */
+function InsightsPanel({ lead, enrichment }: { lead: DbLead; enrichment: LeadEnrichment | null }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="border-t border-stone-100 bg-stone-50/40">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-6 py-3.5 text-left"
+      >
+        <ChevronToggle open={open} />
+        <span className="text-xs font-semibold uppercase tracking-wide text-stone-600">
+          🔬 DataForSEO-Insights
+        </span>
+        <span className="ml-auto text-[10px] text-stone-400">{open ? "einklappen" : "ausklappen"}</span>
+      </button>
+      {/* hidden statt unmount → Sektions-State (geladen/ausgeklappt) bleibt erhalten */}
+      <div className={open ? "" : "hidden"}>
+        <WebsiteCheckSection
+          lead={lead}
+          initial={enrichment?.website ?? null}
+          initialKeywords={enrichment?.rankedKeywords ?? null}
+        />
+        <MarketCheckSection lead={lead} initial={enrichment?.market ?? null} />
+        <CompetitorsSection lead={lead} initial={enrichment?.competitors ?? null} />
+        <ReviewsSection lead={lead} initial={enrichment?.reviews ?? null} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Website-Check (DataForSEO OnPage + Lighthouse) – on-demand im Modal
 // ============================================================================
 
 function WebsiteCheckSection({
   lead,
   initial,
+  initialKeywords,
 }: {
   lead: DbLead;
   initial: WebsiteCheck | null;
+  initialKeywords: RankedKeyword[] | null;
 }) {
   const [check, setCheck] = useState<WebsiteCheck | null>(initial);
   const [loading, setLoading] = useState<null | "onpage" | "lighthouse">(null);
@@ -1081,44 +1161,39 @@ function WebsiteCheckSection({
 
   const hasLighthouse = check && (check.lhPerformance != null || check.lighthouseError != null);
 
-  return (
-    <div className="border-t border-stone-100 px-6 py-5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
-          🌐 Website-Check
-        </span>
-        {hasWebsite && (
-          <div className="flex items-center gap-3">
-            {check && !hasLighthouse && (
-              <button
-                onClick={() => run({ lighthouse: true, force: true })}
-                disabled={loading != null}
-                className="rounded-full bg-neutral-900 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-              >
-                {loading === "lighthouse" ? "⏳ Lighthouse…" : "🔦 Lighthouse laden"}
-              </button>
-            )}
-            {!check ? (
-              <button
-                onClick={() => run()}
-                disabled={loading != null}
-                className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-              >
-                {loading === "onpage" ? "⏳ Analysiere…" : "Website prüfen"}
-              </button>
-            ) : (
-              <button
-                onClick={() => run({ lighthouse: hasLighthouse ? true : false, force: true })}
-                disabled={loading != null}
-                className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
-              >
-                {loading === "onpage" ? "⏳…" : "↻ Aktualisieren"}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+  const headerRight = hasWebsite ? (
+    <div className="flex items-center gap-3">
+      {check && !hasLighthouse && (
+        <button
+          onClick={() => run({ lighthouse: true, force: true })}
+          disabled={loading != null}
+          className="rounded-full bg-neutral-900 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {loading === "lighthouse" ? "⏳ Lighthouse…" : "🔦 Lighthouse laden"}
+        </button>
+      )}
+      {!check ? (
+        <button
+          onClick={() => run()}
+          disabled={loading != null}
+          className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {loading === "onpage" ? "⏳ Analysiere…" : "Website prüfen"}
+        </button>
+      ) : (
+        <button
+          onClick={() => run({ lighthouse: hasLighthouse ? true : false, force: true })}
+          disabled={loading != null}
+          className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+        >
+          {loading === "onpage" ? "⏳…" : "↻ Aktualisieren"}
+        </button>
+      )}
+    </div>
+  ) : null;
 
+  return (
+    <CollapsibleSection title="🌐 Website-Check" loaded={Boolean(check)} headerRight={headerRight}>
       {!hasWebsite ? (
         <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-800 ring-1 ring-amber-100">
           ⚠️ Keine Website hinterlegt — idealer Lead für einen Webauftritt.
@@ -1136,6 +1211,112 @@ function WebsiteCheckSection({
         </div>
       )}
       {check && <WebsiteCheckBody check={check} />}
+      {check && hasWebsite && (
+        <div className="mt-3">
+          <RankedKeywordsBlock lead={lead} onpageScore={check.onpageScore} initial={initialKeywords} />
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+/** Keyword-Rankings der Website – nur freigeschaltet, wenn die Seite optimiert ist. */
+function RankedKeywordsBlock({
+  lead,
+  onpageScore,
+  initial,
+}: {
+  lead: DbLead;
+  onpageScore: number | null;
+  initial: RankedKeyword[] | null;
+}) {
+  const [kw, setKw] = useState<RankedKeyword[] | null>(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initial) setKw(initial);
+  }, [initial]);
+
+  const optimized = onpageScore != null && onpageScore >= 70;
+
+  async function load(force = false) {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/ranked-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: lead.uid, url: lead.webseite, force }),
+      });
+      const d = (await r.json()) as { keywords?: RankedKeyword[]; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setKw(d.keywords ?? []);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl bg-stone-50 p-3">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-stone-400">
+          Keyword-Rankings
+        </span>
+        {optimized ? (
+          !kw ? (
+            <button
+              onClick={() => load()}
+              disabled={loading}
+              className="rounded-full bg-neutral-900 px-3 py-1 text-[11px] font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+            >
+              {loading ? "⏳…" : "Laden"}
+            </button>
+          ) : (
+            <button
+              onClick={() => load(true)}
+              disabled={loading}
+              className="text-[10px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+            >
+              {loading ? "⏳…" : "↻"}
+            </button>
+          )
+        ) : (
+          <span className="text-[10px] text-stone-400">ab OnPage ≥ 70</span>
+        )}
+      </div>
+
+      {!optimized ? (
+        <p className="text-[11px] text-stone-400">
+          Seite zu wenig optimiert ({onpageScore ?? "?"}/100) — Keyword-Rankings lohnen sich erst ab ~70.
+        </p>
+      ) : error ? (
+        <p className="text-[11px] text-rose-600">❌ {error}</p>
+      ) : kw && kw.length === 0 ? (
+        <p className="text-[11px] text-stone-500">Rankt für keine relevanten Keywords.</p>
+      ) : kw && kw.length > 0 ? (
+        <ul className="space-y-1">
+          {kw.slice(0, 10).map((k, i) => (
+            <li key={`${k.keyword}-${i}`} className="flex items-center gap-2 text-[12px] text-stone-600">
+              <span className="w-8 shrink-0 text-right font-semibold tabular-nums text-stone-400">
+                #{k.position}
+              </span>
+              <span className="flex-1 truncate">{k.keyword}</span>
+              {k.searchVolume != null && (
+                <span className="shrink-0 text-[11px] tabular-nums text-stone-400">
+                  {k.searchVolume.toLocaleString("de-DE")}/M
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[11px] text-stone-400">
+          Für welche Keywords die Seite bei Google rankt (Position + Suchvolumen). ~2 ct.
+        </p>
+      )}
     </div>
   );
 }
@@ -1252,31 +1433,26 @@ function MarketCheckSection({ lead, initial }: { lead: DbLead; initial: MarketCh
     }
   }
 
-  return (
-    <div className="border-t border-stone-100 px-6 py-5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
-          📊 Ranking &amp; Markt
-        </span>
-        {!market ? (
-          <button
-            onClick={() => run(false)}
-            disabled={loading}
-            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {loading ? "⏳ Prüfe…" : "Markt prüfen"}
-          </button>
-        ) : (
-          <button
-            onClick={() => run(true)}
-            disabled={loading}
-            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
-          >
-            {loading ? "⏳…" : "↻ Aktualisieren"}
-          </button>
-        )}
-      </div>
+  const headerRight = !market ? (
+    <button
+      onClick={() => run(false)}
+      disabled={loading}
+      className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+    >
+      {loading ? "⏳ Prüfe…" : "Markt prüfen"}
+    </button>
+  ) : (
+    <button
+      onClick={() => run(true)}
+      disabled={loading}
+      className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+    >
+      {loading ? "⏳…" : "↻ Aktualisieren"}
+    </button>
+  );
 
+  return (
+    <CollapsibleSection title="📊 Ranking & Markt" loaded={Boolean(market)} headerRight={headerRight}>
       {!market && !loading && !error && (
         <p className="text-[11px] text-stone-400">
           Google-Ranking für „{lead.dienstleistung} {lead.ort}" + monatliches Suchvolumen. Verbraucht
@@ -1289,7 +1465,7 @@ function MarketCheckSection({ lead, initial }: { lead: DbLead; initial: MarketCh
         </div>
       )}
       {market && <MarketBody market={market} hasWebsite={Boolean(lead.webseite)} />}
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -1398,31 +1574,26 @@ function CompetitorsSection({ lead, initial }: { lead: DbLead; initial: Competit
     }
   }
 
-  return (
-    <div className="border-t border-stone-100 px-6 py-5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
-          🏆 Konkurrenz im Umkreis
-        </span>
-        {!data ? (
-          <button
-            onClick={() => run(false)}
-            disabled={loading}
-            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {loading ? "⏳ Lädt…" : "Konkurrenz prüfen"}
-          </button>
-        ) : (
-          <button
-            onClick={() => run(true)}
-            disabled={loading}
-            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
-          >
-            {loading ? "⏳…" : "↻ Aktualisieren"}
-          </button>
-        )}
-      </div>
+  const headerRight = !data ? (
+    <button
+      onClick={() => run(false)}
+      disabled={loading}
+      className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+    >
+      {loading ? "⏳ Lädt…" : "Konkurrenz prüfen"}
+    </button>
+  ) : (
+    <button
+      onClick={() => run(true)}
+      disabled={loading}
+      className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+    >
+      {loading ? "⏳…" : "↻ Aktualisieren"}
+    </button>
+  );
 
+  return (
+    <CollapsibleSection title="🏆 Konkurrenz im Umkreis" loaded={Boolean(data)} headerRight={headerRight}>
       {!data && !loading && !error && (
         <p className="text-[11px] text-stone-400">
           Vergleicht den Lead mit Mitbewerbern in der Umgebung (Bewertung, Reviews, Website). Eine
@@ -1435,7 +1606,7 @@ function CompetitorsSection({ lead, initial }: { lead: DbLead; initial: Competit
         </div>
       )}
       {data && <CompetitorsBody data={data} />}
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -1552,31 +1723,26 @@ function ReviewsSection({ lead, initial }: { lead: DbLead; initial: ReviewItem[]
     }
   }
 
-  return (
-    <div className="border-t border-stone-100 px-6 py-5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
-          💬 Negative Bewertungen
-        </span>
-        {!reviews ? (
-          <button
-            onClick={() => load(false)}
-            disabled={loading}
-            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {loading ? "⏳ Lädt… (dauert)" : "Reviews laden"}
-          </button>
-        ) : (
-          <button
-            onClick={() => load(true)}
-            disabled={loading}
-            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
-          >
-            {loading ? "⏳…" : "↻ Aktualisieren"}
-          </button>
-        )}
-      </div>
+  const headerRight = !reviews ? (
+    <button
+      onClick={() => load(false)}
+      disabled={loading}
+      className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+    >
+      {loading ? "⏳ Lädt… (dauert)" : "Reviews laden"}
+    </button>
+  ) : (
+    <button
+      onClick={() => load(true)}
+      disabled={loading}
+      className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+    >
+      {loading ? "⏳…" : "↻ Aktualisieren"}
+    </button>
+  );
 
+  return (
+    <CollapsibleSection title="💬 Negative Bewertungen" loaded={Boolean(reviews)} headerRight={headerRight}>
       {!reviews && !loading && !error && (
         <p className="text-[11px] text-stone-400">
           Holt die schlechtesten Bewertungstexte als Gesprächsaufhänger. Läuft asynchron – kann ein
@@ -1601,7 +1767,7 @@ function ReviewsSection({ lead, initial }: { lead: DbLead; initial: ReviewItem[]
           ))}
         </ul>
       )}
-    </div>
+    </CollapsibleSection>
   );
 }
 

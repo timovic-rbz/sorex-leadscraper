@@ -11,6 +11,7 @@ import type {
   ListWithStats,
   MarketCheck,
   QualifiedInfo,
+  RankedKeyword,
   ReviewItem,
   Setter,
   WebsiteCheck,
@@ -660,6 +661,11 @@ export async function dbSaveLeadReviews(uid: string, reviews: ReviewItem[]): Pro
 export async function dbSaveLeadCompetitors(uid: string, competitors: CompetitorCheck): Promise<void> {
   await ensureSchema();
   await mergeEnrichment(uid, { competitors, competitorsAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadRankedKeywords(uid: string, rankedKeywords: RankedKeyword[]): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { rankedKeywords, rankedKeywordsAt: new Date().toISOString() });
 }
 
 // =============================================================================
