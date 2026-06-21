@@ -9,7 +9,9 @@ import type {
   LeadStatus,
   List,
   ListWithStats,
+  MarketCheck,
   QualifiedInfo,
+  ReviewItem,
   Setter,
   WebsiteCheck,
 } from "./types";
@@ -648,6 +650,16 @@ export async function dbSaveLeadProfile(uid: string, profile: BusinessProfile): 
 export async function dbSaveLeadWebsite(uid: string, website: WebsiteCheck): Promise<void> {
   await ensureSchema();
   await mergeEnrichment(uid, { website, websiteAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadMarket(uid: string, market: MarketCheck): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { market, marketAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadReviews(uid: string, reviews: ReviewItem[]): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { reviews, reviewsAt: new Date().toISOString() });
 }
 
 // =============================================================================

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { use } from "react";
@@ -12,6 +12,8 @@ import {
   type LeadEnrichment,
   type LeadStatus,
   type List,
+  type MarketCheck,
+  type ReviewItem,
   type WebsiteCheck,
 } from "@/lib/types";
 import { GoogleProfileButton } from "@/components/GoogleProfileButton";
@@ -858,6 +860,12 @@ function LeadModal({
         {/* DataForSEO Website-Check (on-demand, gecacht) */}
         <WebsiteCheckSection lead={lead} initial={enrichment?.website ?? null} />
 
+        {/* DataForSEO Ranking & Markt (on-demand, gecacht) */}
+        <MarketCheckSection lead={lead} initial={enrichment?.market ?? null} />
+
+        {/* DataForSEO negative Reviews (on-demand, gecacht) */}
+        <ReviewsSection lead={lead} initial={enrichment?.reviews ?? null} />
+
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -995,6 +1003,19 @@ function extractCid(mapsUrl: string | undefined): string | undefined {
   if (!mapsUrl) return undefined;
   return mapsUrl.match(/[?&]cid=(\d+)/)?.[1];
 }
+
+/** Reine Domain aus einer URL (ohne www), sonst undefined. */
+function domainOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /**
  * Reichert einen Lead an (Profil + Website-OnPage), serverseitig gecacht.
@@ -1404,6 +1425,287 @@ function ScorePill({ label, value }: { label: string; value: number }) {
       <span className="tabular-nums">{value}</span>
       <span className="font-medium opacity-80">{label}</span>
     </span>
+  );
+}
+
+// ============================================================================
+// Ranking & Markt (DataForSEO SERP + Suchvolumen) – on-demand im Modal
+// ============================================================================
+
+function MarketCheckSection({ lead, initial }: { lead: DbLead; initial: MarketCheck | null }) {
+  const [market, setMarket] = useState<MarketCheck | null>(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initial) setMarket(initial);
+  }, [initial]);
+
+  async function run(force = false) {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/market-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: lead.uid,
+          service: lead.dienstleistung,
+          city: lead.ort,
+          websiteDomain: domainOf(lead.webseite),
+          force,
+        }),
+      });
+      const d = (await r.json()) as { market?: MarketCheck | null; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setMarket(d.market ?? null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-6 py-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+          📊 Ranking &amp; Markt
+        </span>
+        {!market ? (
+          <button
+            onClick={() => run(false)}
+            disabled={loading}
+            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "⏳ Prüfe…" : "Markt prüfen"}
+          </button>
+        ) : (
+          <button
+            onClick={() => run(true)}
+            disabled={loading}
+            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+          >
+            {loading ? "⏳…" : "↻ Aktualisieren"}
+          </button>
+        )}
+      </div>
+
+      {!market && !loading && !error && (
+        <p className="text-[11px] text-stone-400">
+          Google-Ranking für „{lead.dienstleistung} {lead.ort}" + monatliches Suchvolumen. Verbraucht
+          ~5 ct (Suchvolumen), danach gecacht.
+        </p>
+      )}
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+      {market && <MarketBody market={market} hasWebsite={Boolean(lead.webseite)} />}
+    </div>
+  );
+}
+
+function MarketBody({ market, hasWebsite }: { market: MarketCheck; hasWebsite: boolean }) {
+  const rankTone =
+    market.rank == null
+      ? "bg-rose-100 text-rose-800"
+      : market.rank <= 3
+        ? "bg-emerald-100 text-emerald-800"
+        : market.rank <= 10
+          ? "bg-amber-100 text-amber-800"
+          : "bg-rose-100 text-rose-800";
+  const compDe =
+    market.competition === "HIGH"
+      ? "hoch"
+      : market.competition === "MEDIUM"
+        ? "mittel"
+        : market.competition === "LOW"
+          ? "niedrig"
+          : "";
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${rankTone}`}>
+          📍{" "}
+          {market.rank != null
+            ? `Platz ${market.rank}`
+            : hasWebsite
+              ? `Nicht in Top ${market.rankDepth}`
+              : "Kein organisches Ranking"}
+        </span>
+        {market.searchVolume != null && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+            🔎 {market.searchVolume.toLocaleString("de-DE")} Suchen/Monat
+          </span>
+        )}
+        {compDe && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600">
+            Wettbewerb {compDe}
+          </span>
+        )}
+        {market.cpc != null && market.cpc > 0 && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+            CPC {market.cpc.toFixed(2)} €
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] text-stone-400">Keyword: „{market.keyword}"</p>
+
+      {market.topCompetitors.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">
+            Stehen über diesem Lead
+          </div>
+          <ol className="space-y-1">
+            {market.topCompetitors.map((c) => (
+              <li key={c.domain} className="flex items-center gap-2 text-[12px] text-stone-600">
+                <span className="w-5 shrink-0 text-right font-semibold tabular-nums text-stone-400">
+                  {c.rank}.
+                </span>
+                <span className="truncate">{c.domain}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Negative Reviews (DataForSEO, task-basiert mit Polling) – on-demand im Modal
+// ============================================================================
+
+interface ReviewsResponse {
+  ready: boolean;
+  reviews?: ReviewItem[];
+  taskId?: string;
+  error?: string;
+}
+
+function ReviewsSection({ lead, initial }: { lead: DbLead; initial: ReviewItem[] | null }) {
+  const [reviews, setReviews] = useState<ReviewItem[] | null>(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
+
+  useEffect(() => {
+    if (initial) setReviews(initial);
+  }, [initial]);
+
+  async function postReviews(payload: Record<string, unknown>): Promise<ReviewsResponse> {
+    const r = await fetch("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: lead.uid, ...payload }),
+    });
+    const d = (await r.json()) as ReviewsResponse;
+    if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+    return d;
+  }
+
+  async function load(force = false) {
+    setLoading(true);
+    setError(null);
+    try {
+      const cid = extractCid(lead.googleMaps);
+      const placeId = lead.uid.startsWith("google:") ? lead.uid.slice("google:".length) : undefined;
+      let res = await postReviews({ cid, placeId, name: lead.firmenname, force });
+      if (res.ready) {
+        if (mounted.current) setReviews(res.reviews ?? []);
+        return;
+      }
+      // Polling: alle 6s, bis zu ~2 Min.
+      for (let i = 0; i < 20 && res.taskId && mounted.current; i++) {
+        await wait(6000);
+        if (!mounted.current) return;
+        res = await postReviews({ taskId: res.taskId });
+        if (res.ready) {
+          if (mounted.current) setReviews(res.reviews ?? []);
+          return;
+        }
+      }
+      throw new Error("Reviews noch nicht bereit – bitte später erneut versuchen.");
+    } catch (e) {
+      if (mounted.current) setError((e as Error).message);
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-6 py-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+          💬 Negative Bewertungen
+        </span>
+        {!reviews ? (
+          <button
+            onClick={() => load(false)}
+            disabled={loading}
+            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "⏳ Lädt… (dauert)" : "Reviews laden"}
+          </button>
+        ) : (
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+          >
+            {loading ? "⏳…" : "↻ Aktualisieren"}
+          </button>
+        )}
+      </div>
+
+      {!reviews && !loading && !error && (
+        <p className="text-[11px] text-stone-400">
+          Holt die schlechtesten Bewertungstexte als Gesprächsaufhänger. Läuft asynchron – kann ein
+          paar Sekunden bis zu 1–2 Min dauern. Danach gecacht.
+        </p>
+      )}
+      {loading && (
+        <p className="text-[11px] text-stone-400">⏳ Reviews werden bei DataForSEO geholt…</p>
+      )}
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+      {reviews && reviews.length === 0 && !loading && (
+        <p className="text-sm text-stone-500">Keine Bewertungen gefunden.</p>
+      )}
+      {reviews && reviews.length > 0 && (
+        <ul className="space-y-2.5">
+          {reviews.slice(0, 6).map((rv, i) => (
+            <ReviewRow key={i} review={rv} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ReviewRow({ review }: { review: ReviewItem }) {
+  const low = review.rating != null && review.rating <= 2;
+  return (
+    <li className="rounded-xl border border-stone-200 bg-white p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+            low ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"
+          }`}
+        >
+          ⭐ {review.rating ?? "?"}
+        </span>
+        {review.author && <span className="text-[11px] text-stone-500">{review.author}</span>}
+        {review.timeAgo && <span className="text-[11px] text-stone-400">· {review.timeAgo}</span>}
+      </div>
+      {review.text && <p className="text-[13px] leading-snug text-stone-700">{review.text}</p>}
+    </li>
   );
 }
 

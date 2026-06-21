@@ -111,6 +111,32 @@ export interface WebsiteCheck {
   lighthouseError: string | null;
 }
 
+/** Google-Ranking + Marktdaten zum Hauptkeyword (Dienstleistung + Ort) eines Leads. */
+export interface MarketCheck {
+  /** Geprüftes Keyword, z.B. "nagelstudio langenfeld". */
+  keyword: string;
+  /** Durchschnittliches monatliches Suchvolumen (null = unbekannt). */
+  searchVolume: number | null;
+  /** Wettbewerb laut Google Ads: HIGH / MEDIUM / LOW (oder ""). */
+  competition: string;
+  /** Klickpreis in EUR (Indikator, wie umkämpft die Branche ist). */
+  cpc: number | null;
+  /** Eigene organische Position (rank_absolute) oder null = nicht in den Top N. */
+  rank: number | null;
+  /** Wie tief im SERP gesucht wurde (z.B. 20). */
+  rankDepth: number;
+  /** Top-Konkurrenten, die über dem Lead stehen. */
+  topCompetitors: { rank: number; domain: string; title: string }[];
+}
+
+/** Eine einzelne Google-Bewertung (für negative Gesprächsaufhänger). */
+export interface ReviewItem {
+  rating: number | null;
+  text: string;
+  timeAgo: string;
+  author: string;
+}
+
 /**
  * In der DB gecachte DataForSEO-Anreicherung eines Leads. Wird pro Lead nur
  * einmal bezahlt – erneutes Öffnen liest aus dem Cache.
@@ -122,6 +148,10 @@ export interface LeadEnrichment {
   website?: WebsiteCheck;
   /** ISO-Zeitpunkt, wann der Website-Check lief. */
   websiteAt?: string;
+  market?: MarketCheck;
+  marketAt?: string;
+  reviews?: ReviewItem[];
+  reviewsAt?: string;
 }
 
 export interface List {

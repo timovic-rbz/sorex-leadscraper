@@ -1,10 +1,13 @@
-import type { BusinessProfile, Lead, WebsiteCheck } from "./types";
+import type { BusinessProfile, Lead, MarketCheck, ReviewItem, WebsiteCheck } from "./types";
 import { getApiKey } from "./api-keys";
 import {
   recordDataForSeoLighthouse,
   recordDataForSeoMapsSearch,
   recordDataForSeoMyBusinessInfo,
   recordDataForSeoOnPage,
+  recordDataForSeoReviews,
+  recordDataForSeoSearchVolume,
+  recordDataForSeoSerp,
 } from "./usage";
 
 // Google-Maps-SERP, synchroner "Live"-Endpoint (kein Polling nötig).
@@ -15,6 +18,13 @@ const MY_BUSINESS_INFO_URL =
 // Website-Analyse: schneller OnPage-Check + (langsamere) Lighthouse-Scores.
 const ONPAGE_INSTANT_URL = "https://api.dataforseo.com/v3/on_page/instant_pages";
 const LIGHTHOUSE_LIVE_URL = "https://api.dataforseo.com/v3/on_page/lighthouse/live/json";
+// Ranking + Markt: organisches SERP-Ranking + Such-Volumen.
+const SERP_ORGANIC_URL = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
+const SEARCH_VOLUME_URL =
+  "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live";
+// Reviews (task-basiert: erst posten, dann pollen).
+const REVIEWS_POST_URL = "https://api.dataforseo.com/v3/business_data/google/reviews/task_post";
+const REVIEWS_GET_URL = "https://api.dataforseo.com/v3/business_data/google/reviews/task_get";
 // location_code für Deutschland (DataForSEO-Standortkatalog).
 const LOCATION_CODE_DE = 2276;
 
@@ -561,4 +571,200 @@ function scoreToPct(score: number | null | undefined): number | null {
   const n = Number(score);
   if (!Number.isFinite(n)) return null;
   return Math.round(n <= 1 ? n * 100 : n);
+}
+
+// =============================================================================
+// MARKT & RANKING – organisches Google-Ranking + Such-Volumen zum Keyword
+// =============================================================================
+
+/** Basic-Auth-Header aus den gespeicherten Credentials (oder Fehler). */
+async function authHeader(): Promise<string> {
+  const cred = ((await credentials()) ?? "").trim();
+  if (!cred.includes(":")) {
+    throw new Error(
+      "Keine DataForSEO-Credentials konfiguriert. Unter Einstellungen im Format login:passwort hinterlegen.",
+    );
+  }
+  return `Basic ${Buffer.from(cred).toString("base64")}`;
+}
+
+interface DfsSerpItem {
+  type?: string;
+  rank_absolute?: number;
+  domain?: string;
+  title?: string;
+}
+interface DfsSerpResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: { items?: DfsSerpItem[] }[] | null;
+  }[];
+}
+interface DfsVolItem {
+  keyword?: string;
+  search_volume?: number | null;
+  competition?: string | null;
+  cpc?: number | null;
+}
+interface DfsVolResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: DfsVolItem[] | null;
+  }[];
+}
+
+/**
+ * Markt-Check zum Hauptkeyword (Dienstleistung + Ort): organisches Google-
+ * Ranking des Leads + monatliches Suchvolumen. Beide Calls parallel & robust.
+ */
+export async function getMarketCheck(params: {
+  service: string;
+  city: string;
+  websiteDomain?: string;
+}): Promise<MarketCheck> {
+  const auth = await authHeader();
+  const headers = { Authorization: auth, "Content-Type": "application/json" };
+  const keyword = `${params.service} ${params.city}`.trim().replace(/\s+/g, " ").toLowerCase();
+
+  const [serpRes, volRes] = await Promise.allSettled([
+    runSerpRanking(keyword, headers, params.websiteDomain),
+    runSearchVolume(keyword, headers),
+  ]);
+
+  const market: MarketCheck = {
+    keyword,
+    searchVolume: null,
+    competition: "",
+    cpc: null,
+    rank: null,
+    rankDepth: 20,
+    topCompetitors: [],
+  };
+  if (serpRes.status === "fulfilled") Object.assign(market, serpRes.value);
+  if (volRes.status === "fulfilled") Object.assign(market, volRes.value);
+  if (serpRes.status === "rejected" && volRes.status === "rejected") {
+    throw serpRes.reason instanceof Error ? serpRes.reason : new Error("Markt-Analyse fehlgeschlagen");
+  }
+  return market;
+}
+
+const normDomain = (d: string | undefined): string => (d ?? "").toLowerCase().replace(/^www\./, "");
+
+async function runSerpRanking(
+  keyword: string,
+  headers: Record<string, string>,
+  websiteDomain?: string,
+): Promise<Partial<MarketCheck>> {
+  const depth = 20;
+  const r = await fetch(SERP_ORGANIC_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ keyword, language_code: "de", location_code: LOCATION_CODE_DE, depth }]),
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO SERP", r);
+  const data = (await r.json()) as DfsSerpResponse;
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) {
+    throw new Error(`DataForSEO SERP: ${task?.status_message ?? "Fehler"}`);
+  }
+  void recordDataForSeoSerp();
+  const items = (task.result?.[0]?.items ?? []).filter((i) => i.type === "organic");
+  const target = normDomain(websiteDomain);
+  const mine = target ? items.find((i) => normDomain(i.domain) === target) : undefined;
+  const rank = mine?.rank_absolute ?? null;
+  const topCompetitors = items
+    .filter((i) => normDomain(i.domain) !== target)
+    .filter((i) => rank == null || (i.rank_absolute ?? 999) < rank)
+    .slice(0, 3)
+    .map((i) => ({ rank: i.rank_absolute ?? 0, domain: normDomain(i.domain), title: i.title ?? "" }));
+  return { rank, rankDepth: depth, topCompetitors };
+}
+
+async function runSearchVolume(
+  keyword: string,
+  headers: Record<string, string>,
+): Promise<Partial<MarketCheck>> {
+  const r = await fetch(SEARCH_VOLUME_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ keywords: [keyword], language_code: "de", location_code: LOCATION_CODE_DE }]),
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO Keywords", r);
+  const data = (await r.json()) as DfsVolResponse;
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) {
+    throw new Error(`DataForSEO Keywords: ${task?.status_message ?? "Fehler"}`);
+  }
+  void recordDataForSeoSearchVolume();
+  const item = task.result?.[0];
+  return {
+    searchVolume: item?.search_volume ?? null,
+    competition: item?.competition ?? "",
+    cpc: item?.cpc ?? null,
+  };
+}
+
+// =============================================================================
+// REVIEWS – Bewertungstexte (task-basiert: posten → pollen)
+// =============================================================================
+
+interface DfsReviewItem {
+  rating?: { value?: number };
+  review_text?: string;
+  text?: string;
+  time_ago?: string;
+  profile_name?: string;
+}
+
+/** Reviews-Task anlegen (sortiert nach niedrigster Bewertung). Liefert die Task-ID. */
+export async function postReviewsTask(params: {
+  cid?: string;
+  placeId?: string;
+  name?: string;
+}): Promise<string> {
+  if (!params.cid && !params.placeId && !params.name) {
+    throw new Error("Kein Identifikator (cid/place_id/Name) für Reviews übergeben.");
+  }
+  const headers = { Authorization: await authHeader(), "Content-Type": "application/json" };
+  const target = params.cid
+    ? { cid: params.cid }
+    : params.placeId
+      ? { place_id: params.placeId }
+      : { keyword: params.name };
+  const r = await fetch(REVIEWS_POST_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([
+      { ...target, language_code: "de", location_code: LOCATION_CODE_DE, depth: 10, sort_by: "lowest_rating" },
+    ]),
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO Reviews", r);
+  const data = (await r.json()) as { tasks?: { id?: string; status_message?: string }[] };
+  const id = data.tasks?.[0]?.id;
+  if (!id) throw new Error(`DataForSEO Reviews: ${data.tasks?.[0]?.status_message ?? "Task fehlgeschlagen"}`);
+  return id;
+}
+
+/** Reviews-Task abfragen. ready=false bedeutet: noch in Arbeit, später erneut pollen. */
+export async function getReviewsTask(id: string): Promise<{ ready: boolean; reviews: ReviewItem[] }> {
+  const r = await fetch(`${REVIEWS_GET_URL}/${encodeURIComponent(id)}`, {
+    headers: { Authorization: await authHeader() },
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO Reviews", r);
+  const data = (await r.json()) as {
+    tasks?: { status_code?: number; result?: { items?: DfsReviewItem[] }[] | null }[];
+  };
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) return { ready: false, reviews: [] };
+  const items = task.result?.[0]?.items ?? [];
+  const reviews: ReviewItem[] = items.map((i) => ({
+    rating: i.rating?.value ?? null,
+    text: (i.review_text ?? i.text ?? "").trim(),
+    timeAgo: i.time_ago ?? "",
+    author: i.profile_name ?? "",
+  }));
+  void recordDataForSeoReviews(reviews.length);
+  return { ready: true, reviews };
 }

@@ -30,6 +30,15 @@ const DATAFORSEO_ONPAGE_USD = 0.00125;
 // DataForSEO "OnPage – Lighthouse Live" — ~$0.003 pro Lighthouse-Lauf
 const DATAFORSEO_LIGHTHOUSE_USD = 0.003;
 
+// DataForSEO "SERP Google Organic – Live Advanced" — ~$0.002 pro 10 Treffer (depth 20 = 2×)
+const DATAFORSEO_SERP_USD = 0.004;
+
+// DataForSEO "Keywords Data – Google Ads Search Volume Live" — ~$0.05 pro Request
+const DATAFORSEO_SEARCH_VOLUME_USD = 0.05;
+
+// DataForSEO "Business Data – Google Reviews" — ~$0.0008 pro 10 Reviews
+const DATAFORSEO_REVIEWS_USD = 0.0008;
+
 // Anthropic Claude (Sonnet 4.5) — Input/Output in USD pro 1M Tokens
 const ANTHROPIC_INPUT_USD_PER_MTOK = 3.0;
 const ANTHROPIC_OUTPUT_USD_PER_MTOK = 15.0;
@@ -71,6 +80,20 @@ export async function recordDataForSeoOnPage(): Promise<void> {
 
 export async function recordDataForSeoLighthouse(): Promise<void> {
   await dbRecordUsage("dataforseo", "lighthouse", 1, DATAFORSEO_LIGHTHOUSE_USD * USD_TO_EUR);
+}
+
+export async function recordDataForSeoSerp(): Promise<void> {
+  await dbRecordUsage("dataforseo", "serp_organic", 1, DATAFORSEO_SERP_USD * USD_TO_EUR);
+}
+
+export async function recordDataForSeoSearchVolume(): Promise<void> {
+  await dbRecordUsage("dataforseo", "search_volume", 1, DATAFORSEO_SEARCH_VOLUME_USD * USD_TO_EUR);
+}
+
+export async function recordDataForSeoReviews(reviewsReturned: number): Promise<void> {
+  // Abrechnung pro 10 Reviews.
+  const units = Math.max(1, Math.ceil(reviewsReturned / 10));
+  await dbRecordUsage("dataforseo", "reviews", reviewsReturned, units * DATAFORSEO_REVIEWS_USD * USD_TO_EUR);
 }
 
 export async function recordAnthropicCall(inputTokens: number, outputTokens: number): Promise<void> {
