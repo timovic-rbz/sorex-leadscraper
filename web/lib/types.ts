@@ -111,6 +111,19 @@ export interface WebsiteCheck {
   lighthouseError: string | null;
 }
 
+/**
+ * In der DB gecachte DataForSEO-Anreicherung eines Leads. Wird pro Lead nur
+ * einmal bezahlt – erneutes Öffnen liest aus dem Cache.
+ */
+export interface LeadEnrichment {
+  profile?: BusinessProfile;
+  /** ISO-Zeitpunkt, wann das Profil geladen wurde. */
+  profileAt?: string;
+  website?: WebsiteCheck;
+  /** ISO-Zeitpunkt, wann der Website-Check lief. */
+  websiteAt?: string;
+}
+
 export interface List {
   id: number;
   name: string;

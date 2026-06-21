@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getBusinessProfile } from "@/lib/dataforseo";
+import { dbGetLeadEnrichment, dbSaveLeadProfile } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -8,14 +9,21 @@ export const maxDuration = 30;
  * POST /api/business-profile
  *
  * Lädt on-demand das volle Google-Business-Profil eines Leads über DataForSEO
- * (Business Data "My Business Info"). Wird vom Lead-Modal beim Klick auf
- * "Profil laden" aufgerufen – bewusst nicht automatisch, um Credits zu sparen.
+ * (Business Data "My Business Info"). Ergebnis wird pro Lead in der DB gecacht –
+ * erneutes Öffnen ist gratis (sofern uid mitgegeben und force nicht gesetzt).
  *
- * Body: { cid?, placeId?, name?, address?, ort? } – mindestens einer von
- * cid/placeId/name muss gesetzt sein.
+ * Body: { uid?, cid?, placeId?, name?, address?, ort?, force? }
  */
 export async function POST(req: Request) {
-  let body: { cid?: string; placeId?: string; name?: string; address?: string; ort?: string };
+  let body: {
+    uid?: string;
+    cid?: string;
+    placeId?: string;
+    name?: string;
+    address?: string;
+    ort?: string;
+    force?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -23,10 +31,15 @@ export async function POST(req: Request) {
   }
 
   if (!body.cid && !body.placeId && !body.name) {
-    return NextResponse.json(
-      { error: "cid, placeId oder name erforderlich" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "cid, placeId oder name erforderlich" }, { status: 400 });
+  }
+
+  // Cache: bereits geladenes Profil ohne erneuten (kostenpflichtigen) Call zurückgeben.
+  if (body.uid && !body.force) {
+    const cached = await dbGetLeadEnrichment(body.uid);
+    if (cached?.profile) {
+      return NextResponse.json({ profile: cached.profile, cached: true, at: cached.profileAt });
+    }
   }
 
   try {
@@ -37,7 +50,8 @@ export async function POST(req: Request) {
       address: body.address,
       ort: body.ort,
     });
-    return NextResponse.json({ profile });
+    if (body.uid && profile) await dbSaveLeadProfile(body.uid, profile);
+    return NextResponse.json({ profile, cached: false });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
   }

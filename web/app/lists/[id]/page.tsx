@@ -9,6 +9,7 @@ import {
   LEAD_STATUS_ORDER,
   type BusinessProfile,
   type DbLead,
+  type LeadEnrichment,
   type LeadStatus,
   type List,
   type WebsiteCheck,
@@ -143,6 +144,47 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     return { total: data.leads.length, withWebsite, withoutWebsite };
   }, [data]);
 
+  // Aktuell sichtbare Leads (Website-Filter + nicht ausgeblendete Status-Spalten)
+  // – das Set, auf das sich die Batch-Anreicherung bezieht.
+  const visibleLeads = useMemo(
+    () => LEAD_STATUS_ORDER.filter((s) => !hidden.has(s)).flatMap((s) => grouped[s]),
+    [grouped, hidden],
+  );
+
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
+
+  async function enrichVisible() {
+    const leads = visibleLeads;
+    if (leads.length === 0 || batch) return;
+    // Profil (~0,2 ct) + Website-OnPage (~0,1 ct, nur wenn Website da). Lighthouse
+    // bewusst NICHT im Batch (zu teuer/langsam). Bereits gecachte = gratis.
+    const estCt = (leads.length * 0.3).toFixed(1);
+    const ok = window.confirm(
+      `${leads.length} sichtbare Leads anreichern?\n\n` +
+        `• Business-Profil (~0,2 ct/Lead)\n` +
+        `• Website-Check OnPage (~0,1 ct, nur mit Website)\n` +
+        `• Lighthouse NICHT im Batch (einzeln im Lead nachladbar)\n\n` +
+        `Geschätzt: ~${estCt} ct. Bereits geladene Leads werden übersprungen (gratis).`,
+    );
+    if (!ok) return;
+
+    setBatch({ done: 0, total: leads.length });
+    const queue = [...leads];
+    let done = 0;
+    const worker = async () => {
+      while (queue.length) {
+        const lead = queue.shift();
+        if (!lead) break;
+        await enrichOne(lead);
+        done++;
+        setBatch({ done, total: leads.length });
+      }
+    };
+    // Begrenzte Parallelität, damit DataForSEO nicht rate-limitet.
+    await Promise.all([worker(), worker(), worker()]);
+    setBatch(null);
+  }
+
   if (error)
     return (
       <div className="mx-auto max-w-7xl p-6 lg:p-10">
@@ -164,7 +206,17 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             {data.leads.length} Leads
           </span>
         </div>
-        <Link href="/" className="btn-primary">+ Mehr Leads suchen</Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={enrichVisible}
+            disabled={batch != null || visibleLeads.length === 0}
+            title="Profil + Website-Check für alle sichtbaren Leads laden (gecachte werden übersprungen)"
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50"
+          >
+            {batch ? `✨ Anreichern… ${batch.done}/${batch.total}` : `✨ Sichtbare anreichern (${visibleLeads.length})`}
+          </button>
+          <Link href="/" className="btn-primary">+ Mehr Leads suchen</Link>
+        </div>
       </header>
 
       {/* Website-Filter (Segmented Control) */}
@@ -620,6 +672,22 @@ function LeadModal({
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Gecachte DataForSEO-Anreicherung laden (reiner DB-Read, kostenlos), damit
+  // bereits Bezahltes sofort ohne erneuten API-Call angezeigt wird.
+  const [enrichment, setEnrichment] = useState<LeadEnrichment | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/leads/${encodeURIComponent(lead.uid)}/enrichment`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { enrichment?: LeadEnrichment | null } | null) => {
+        if (active) setEnrichment(d?.enrichment ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [lead.uid]);
+
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
     setErrorMsg(null);
@@ -784,11 +852,11 @@ function LeadModal({
           <InfoPanel label="Wiedervorlage" value={lead.nextActionAt ? new Date(lead.nextActionAt).toLocaleDateString("de-DE") : "—"} />
         </div>
 
-        {/* DataForSEO Business-Profil (on-demand) */}
-        <BusinessProfileSection lead={lead} />
+        {/* DataForSEO Business-Profil (on-demand, gecacht) */}
+        <BusinessProfileSection lead={lead} initial={enrichment?.profile ?? null} />
 
-        {/* DataForSEO Website-Check (on-demand) */}
-        <WebsiteCheckSection lead={lead} />
+        {/* DataForSEO Website-Check (on-demand, gecacht) */}
+        <WebsiteCheckSection lead={lead} initial={enrichment?.website ?? null} />
 
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
@@ -928,13 +996,63 @@ function extractCid(mapsUrl: string | undefined): string | undefined {
   return mapsUrl.match(/[?&]cid=(\d+)/)?.[1];
 }
 
-function BusinessProfileSection({ lead }: { lead: DbLead }) {
-  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+/**
+ * Reichert einen Lead an (Profil + Website-OnPage), serverseitig gecacht.
+ * Fehler pro Lead werden geschluckt, damit ein Batch nicht abbricht.
+ */
+async function enrichOne(lead: DbLead): Promise<void> {
+  const cid = extractCid(lead.googleMaps);
+  const placeId = lead.uid.startsWith("google:") ? lead.uid.slice("google:".length) : undefined;
+  try {
+    await fetch("/api/business-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid: lead.uid,
+        cid,
+        placeId,
+        name: lead.firmenname,
+        address: lead.adresse,
+        ort: lead.ort,
+      }),
+    });
+  } catch {
+    /* ignorieren – Batch läuft weiter */
+  }
+  if (lead.webseite) {
+    try {
+      await fetch("/api/website-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: lead.uid, url: lead.webseite, lighthouse: false }),
+      });
+    } catch {
+      /* ignorieren */
+    }
+  }
+}
+
+function BusinessProfileSection({
+  lead,
+  initial,
+}: {
+  lead: DbLead;
+  initial: BusinessProfile | null;
+}) {
+  const [profile, setProfile] = useState<BusinessProfile | null>(initial);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(Boolean(initial));
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  // Cache kommt asynchron nach dem ersten Render rein → übernehmen.
+  useEffect(() => {
+    if (initial) {
+      setProfile(initial);
+      setLoaded(true);
+    }
+  }, [initial]);
+
+  async function load(force = false) {
     setLoading(true);
     setError(null);
     try {
@@ -946,11 +1064,13 @@ function BusinessProfileSection({ lead }: { lead: DbLead }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          uid: lead.uid,
           cid,
           placeId,
           name: lead.firmenname,
           address: lead.adresse,
           ort: lead.ort,
+          force,
         }),
       });
       const d = (await r.json()) as { profile?: BusinessProfile | null; error?: string };
@@ -970,13 +1090,21 @@ function BusinessProfileSection({ lead }: { lead: DbLead }) {
         <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
           🔎 Business-Profil
         </span>
-        {!loaded && (
+        {!loaded ? (
           <button
-            onClick={load}
+            onClick={() => load(false)}
             disabled={loading}
             className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
           >
             {loading ? "⏳ Lädt…" : "Profil laden"}
+          </button>
+        ) : (
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+          >
+            {loading ? "⏳…" : "↻ Aktualisieren"}
           </button>
         )}
       </div>
@@ -984,7 +1112,7 @@ function BusinessProfileSection({ lead }: { lead: DbLead }) {
       {!loaded && !loading && !error && (
         <p className="text-[11px] text-stone-400">
           Lädt zusätzliche Details über DataForSEO (Beschreibung, ob das Profil beansprucht ist,
-          Ausstattung, Foto-Anzahl, Review-Themen). Verbraucht ~0,2 ct.
+          Ausstattung, Foto-Anzahl, Review-Themen). Verbraucht ~0,2 ct, danach gecacht.
         </p>
       )}
       {error && (
@@ -1103,21 +1231,36 @@ function ChipRow({ label, items }: { label: string; items: string[] }) {
 // Website-Check (DataForSEO OnPage + Lighthouse) – on-demand im Modal
 // ============================================================================
 
-function WebsiteCheckSection({ lead }: { lead: DbLead }) {
-  const [check, setCheck] = useState<WebsiteCheck | null>(null);
-  const [loading, setLoading] = useState(false);
+function WebsiteCheckSection({
+  lead,
+  initial,
+}: {
+  lead: DbLead;
+  initial: WebsiteCheck | null;
+}) {
+  const [check, setCheck] = useState<WebsiteCheck | null>(initial);
+  const [loading, setLoading] = useState<null | "onpage" | "lighthouse">(null);
   const [error, setError] = useState<string | null>(null);
 
   const hasWebsite = Boolean(lead.webseite);
 
-  async function run() {
-    setLoading(true);
+  useEffect(() => {
+    if (initial) setCheck(initial);
+  }, [initial]);
+
+  async function run(opts: { lighthouse?: boolean; force?: boolean } = {}) {
+    setLoading(opts.lighthouse ? "lighthouse" : "onpage");
     setError(null);
     try {
       const r = await fetch("/api/website-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: lead.webseite }),
+        body: JSON.stringify({
+          uid: lead.uid,
+          url: lead.webseite,
+          lighthouse: opts.lighthouse ?? false,
+          force: opts.force ?? false,
+        }),
       });
       const d = (await r.json()) as { check?: WebsiteCheck; error?: string };
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
@@ -1125,9 +1268,11 @@ function WebsiteCheckSection({ lead }: { lead: DbLead }) {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
+
+  const hasLighthouse = check && (check.lhPerformance != null || check.lighthouseError != null);
 
   return (
     <div className="border-t border-stone-100 px-6 py-5">
@@ -1135,14 +1280,35 @@ function WebsiteCheckSection({ lead }: { lead: DbLead }) {
         <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
           🌐 Website-Check
         </span>
-        {hasWebsite && !check && (
-          <button
-            onClick={run}
-            disabled={loading}
-            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
-          >
-            {loading ? "⏳ Analysiere…" : "Website prüfen"}
-          </button>
+        {hasWebsite && (
+          <div className="flex items-center gap-3">
+            {check && !hasLighthouse && (
+              <button
+                onClick={() => run({ lighthouse: true, force: true })}
+                disabled={loading != null}
+                className="rounded-full bg-neutral-900 px-3 py-1.5 text-[11px] font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {loading === "lighthouse" ? "⏳ Lighthouse…" : "🔦 Lighthouse laden"}
+              </button>
+            )}
+            {!check ? (
+              <button
+                onClick={() => run()}
+                disabled={loading != null}
+                className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+              >
+                {loading === "onpage" ? "⏳ Analysiere…" : "Website prüfen"}
+              </button>
+            ) : (
+              <button
+                onClick={() => run({ lighthouse: hasLighthouse ? true : false, force: true })}
+                disabled={loading != null}
+                className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+              >
+                {loading === "onpage" ? "⏳…" : "↻ Aktualisieren"}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -1150,10 +1316,10 @@ function WebsiteCheckSection({ lead }: { lead: DbLead }) {
         <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-800 ring-1 ring-amber-100">
           ⚠️ Keine Website hinterlegt — idealer Lead für einen Webauftritt.
         </div>
-      ) : !check && !loading && !error ? (
+      ) : !check && loading == null && !error ? (
         <p className="text-[11px] text-stone-400">
-          Prüft die Website per DataForSEO (OnPage-Mängel + Lighthouse-Scores). Verbraucht ~0,5 ct,
-          Lighthouse kann ein paar Sekunden dauern.
+          Prüft die Website per DataForSEO (OnPage-Mängel, ~0,1 ct). Lighthouse-Scores optional
+          danach nachladen. Ergebnis wird gecacht.
         </p>
       ) : null}
 

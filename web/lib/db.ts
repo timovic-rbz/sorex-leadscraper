@@ -1,14 +1,17 @@
 import postgres from "postgres";
 import type {
+  BusinessProfile,
   CommissionSummary,
   DbLead,
   LeaderboardRow,
   Lead,
+  LeadEnrichment,
   LeadStatus,
   List,
   ListWithStats,
   QualifiedInfo,
   Setter,
+  WebsiteCheck,
 } from "./types";
 import { LEAD_STATUS_ORDER } from "./types";
 
@@ -130,6 +133,7 @@ async function runSchema(): Promise<void> {
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_action_at TIMESTAMPTZ`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS qualified_info JSONB`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS enrichment JSONB`,
     sql`ALTER TABLE setters ADD COLUMN IF NOT EXISTS commission_eur NUMERIC NOT NULL DEFAULT 0`,
     sql`
       CREATE TABLE IF NOT EXISTS lead_events (
@@ -609,6 +613,41 @@ export async function dbGetLead(uid: string): Promise<DbLead | null> {
     WHERE l.uid = ${uid}
   `;
   return rows.length > 0 ? rowToDbLead(rows[0]) : null;
+}
+
+// =============================================================================
+// ENRICHMENT-CACHE – DataForSEO-Profil & Website-Check pro Lead (1× bezahlen)
+// =============================================================================
+
+/** Liest die gecachte Anreicherung eines Leads (ohne externen API-Call). */
+export async function dbGetLeadEnrichment(uid: string): Promise<LeadEnrichment | null> {
+  await ensureSchema();
+  const rows = await sql<{ enrichment: LeadEnrichment | null }[]>`
+    SELECT enrichment FROM leads WHERE uid = ${uid}
+  `;
+  return rows[0]?.enrichment ?? null;
+}
+
+/** JSONB-Merge in die enrichment-Spalte – bestehende Keys bleiben erhalten. */
+async function mergeEnrichment(uid: string, patch: Partial<LeadEnrichment>): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const jsonValue = sql.json(patch as any);
+  await sql`
+    UPDATE leads SET enrichment = (
+      CASE WHEN jsonb_typeof(enrichment) = 'object' THEN enrichment ELSE '{}'::jsonb END
+    ) || ${jsonValue}
+    WHERE uid = ${uid}
+  `;
+}
+
+export async function dbSaveLeadProfile(uid: string, profile: BusinessProfile): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { profile, profileAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadWebsite(uid: string, website: WebsiteCheck): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { website, websiteAt: new Date().toISOString() });
 }
 
 // =============================================================================

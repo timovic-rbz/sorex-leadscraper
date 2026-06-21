@@ -381,12 +381,16 @@ interface DfsLhResponse {
 }
 
 /**
- * Analysiert eine Website über DataForSEO. OnPage und Lighthouse laufen parallel
- * und unabhängig: scheitert Lighthouse (z.B. Timeout), kommen die OnPage-Daten
- * trotzdem zurück (und umgekehrt). Wirft nur, wenn BEIDE fehlschlagen.
+ * Analysiert eine Website über DataForSEO. OnPage läuft immer (schnell, günstig);
+ * Lighthouse nur auf Wunsch (opts.lighthouse) – das ist der teure/langsame Teil.
+ * Beide laufen parallel & unabhängig: scheitert Lighthouse (z.B. Timeout), kommen
+ * die OnPage-Daten trotzdem zurück. Wirft nur, wenn OnPage selbst fehlschlägt.
  */
-export async function checkWebsite(rawUrl: string, creds?: string): Promise<WebsiteCheck> {
-  const cred = (creds ?? (await credentials()) ?? "").trim();
+export async function checkWebsite(
+  rawUrl: string,
+  opts: { lighthouse?: boolean } = {},
+): Promise<WebsiteCheck> {
+  const cred = ((await credentials()) ?? "").trim();
   if (!cred.includes(":")) {
     throw new Error(
       "Keine DataForSEO-Credentials konfiguriert. Unter Einstellungen im Format login:passwort hinterlegen.",
@@ -398,7 +402,7 @@ export async function checkWebsite(rawUrl: string, creds?: string): Promise<Webs
 
   const [onpageRes, lhRes] = await Promise.allSettled([
     runOnPage(url, headers),
-    runLighthouse(url, headers),
+    opts.lighthouse ? runLighthouse(url, headers) : Promise.resolve<Partial<WebsiteCheck>>({}),
   ]);
 
   const result: WebsiteCheck = {
@@ -423,16 +427,17 @@ export async function checkWebsite(rawUrl: string, creds?: string): Promise<Webs
   if (onpageRes.status === "fulfilled") {
     Object.assign(result, onpageRes.value);
   } else {
-    result.onpageError = (onpageRes.reason as Error)?.message ?? "OnPage-Analyse fehlgeschlagen";
+    // OnPage ist die Basis – schlägt sie fehl (Creds/Guthaben), ist der ganze Check hin.
+    throw new Error(
+      (onpageRes.reason as Error)?.message ?? "Website-Analyse fehlgeschlagen",
+    );
   }
-  if (lhRes.status === "fulfilled") {
-    Object.assign(result, lhRes.value);
-  } else {
-    result.lighthouseError = (lhRes.reason as Error)?.message ?? "Lighthouse fehlgeschlagen";
-  }
-
-  if (onpageRes.status === "rejected" && lhRes.status === "rejected") {
-    throw new Error(result.onpageError ?? "Website-Analyse fehlgeschlagen");
+  if (opts.lighthouse) {
+    if (lhRes.status === "fulfilled") {
+      Object.assign(result, lhRes.value);
+    } else {
+      result.lighthouseError = (lhRes.reason as Error)?.message ?? "Lighthouse fehlgeschlagen";
+    }
   }
   return result;
 }
