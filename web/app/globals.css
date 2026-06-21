@@ -37,7 +37,7 @@ html, body {
     @apply inline-flex items-center gap-2 rounded-full bg-rose-600 text-white px-3 py-1.5 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.06)] hover:bg-rose-700 transition;
   }
   .btn-primary {
-    @apply inline-flex h-10 items-center gap-2 rounded-full bg-rose-600 text-white px-5 text-sm font-medium hover:bg-rose-700 disabled:opacity-50 transition;
+    @apply inline-flex h-10 items-center gap-2 rounded-full bg-rose-600 text-white px-5 text-sm font-medium shadow-[0_4px_14px_rgba(225,29,72,0.3)] hover:bg-rose-700 disabled:opacity-50 disabled:shadow-none transition;
   }
   .btn-dark {
     @apply inline-flex h-10 items-center gap-2 rounded-full bg-neutral-900 text-white px-5 text-sm font-medium hover:bg-neutral-800 disabled:opacity-50 transition;

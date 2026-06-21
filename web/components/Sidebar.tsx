@@ -1,9 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { SessionInfo } from "@/lib/types";
+import type { CommissionSummary, SessionInfo } from "@/lib/types";
 import { openPhoneSearch } from "./PhoneSearchTrigger";
+
+/** Euro-Betrag kompakt formatieren (ohne Nachkommastellen bei runden Summen). */
+function eur(n: number): string {
+  return n.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 interface NavItem {
   href: string;
@@ -24,8 +35,24 @@ const NAV: NavItem[] = [
 export default function Sidebar({ session }: { session: SessionInfo }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [commission, setCommission] = useState<CommissionSummary | null>(null);
 
   const items = NAV.filter((n) => !n.adminOnly || session.isAdmin);
+
+  // Eigene Monats-Provision laden; bei jedem Seitenwechsel auffrischen, damit ein
+  // frisch geschlossener Deal sich zeitnah im Badge zeigt.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/commission")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { me?: CommissionSummary | null } | null) => {
+        if (active) setCommission(d?.me ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [pathname]);
 
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
@@ -38,6 +65,7 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
       <DesktopSidebar
         items={items}
         session={session}
+        commission={commission}
         pathname={pathname}
         onLogout={logout}
       />
@@ -46,7 +74,7 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
         pathname={pathname}
         onLogout={logout}
       />
-      <MobileTopBar session={session} onLogout={logout} />
+      <MobileTopBar session={session} commission={commission} onLogout={logout} />
     </>
   );
 }
@@ -58,11 +86,13 @@ export default function Sidebar({ session }: { session: SessionInfo }) {
 function DesktopSidebar({
   items,
   session,
+  commission,
   pathname,
   onLogout,
 }: {
   items: NavItem[];
   session: SessionInfo;
+  commission: CommissionSummary | null;
   pathname: string;
   onLogout: () => void;
 }) {
@@ -72,10 +102,13 @@ function DesktopSidebar({
         href={session.isAdmin ? "/" : "/lists"}
         className="mb-6 flex items-center gap-2 px-2"
       >
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-900 text-lg font-semibold text-white">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-900 text-lg font-semibold text-white">
           S
         </div>
-        <span className="text-base font-semibold">Soreax Leadscraper</span>
+        <span className="flex flex-col leading-tight">
+          <span className="text-base font-semibold">Soreax</span>
+          <span className="text-[11px] font-medium text-stone-400">Leadscraper</span>
+        </span>
       </Link>
 
       {/* Globale Telefonnummer-Suche – über allen Nav-Items */}
@@ -99,9 +132,9 @@ function DesktopSidebar({
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 rounded-full px-3 py-2.5 text-sm font-medium transition ${
+              className={`flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm font-medium transition ${
                 active
-                  ? "bg-rose-600 text-white shadow-[0_4px_12px_rgba(225,29,72,0.25)]"
+                  ? "bg-rose-600 text-white shadow-[0_4px_14px_rgba(225,29,72,0.3)]"
                   : "text-stone-600 hover:bg-stone-100"
               }`}
             >
@@ -113,6 +146,24 @@ function DesktopSidebar({
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
+        {commission && commission.rateEur > 0 && (
+          <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-emerald-50 px-3 py-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                💶 Provision · Monat
+              </span>
+              <span className="text-[10px] text-stone-400 tabular-nums">
+                {commission.wonMonth} Abschl.
+              </span>
+            </div>
+            <div className="mt-0.5 text-xl font-bold tabular-nums text-emerald-700">
+              {eur(commission.monthEur)}
+            </div>
+            <div className="text-[10px] text-stone-400">
+              {eur(commission.rateEur)} pro Abschluss
+            </div>
+          </div>
+        )}
         {(session.setterName || session.isAdmin) && (
           <div className="flex items-center gap-2 rounded-2xl bg-stone-50 px-3 py-2">
             <div
@@ -200,9 +251,11 @@ function MobileBottomNav({
 
 function MobileTopBar({
   session,
+  commission,
   onLogout: _onLogout,
 }: {
   session: SessionInfo;
+  commission: CommissionSummary | null;
   onLogout: () => void;
 }) {
   return (
@@ -211,12 +264,20 @@ function MobileTopBar({
       style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 0.625rem)" }}
     >
       <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 text-sm font-semibold text-white">
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-neutral-900 text-sm font-semibold text-white">
           S
         </div>
         <span className="text-sm font-semibold tracking-tight">Soreax</span>
       </div>
       <div className="flex items-center gap-2">
+        {commission && commission.rateEur > 0 && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 tabular-nums"
+            title={`Provision diesen Monat · ${commission.wonMonth} Abschlüsse`}
+          >
+            💶 {eur(commission.monthEur)}
+          </span>
+        )}
         <button
           onClick={openPhoneSearch}
           className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-base text-stone-700"

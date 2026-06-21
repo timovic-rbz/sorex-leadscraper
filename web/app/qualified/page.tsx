@@ -71,7 +71,9 @@ export default function QualifiedPage() {
             das Detail-Sheet mit Ansprechpartner, Bedarf, Demo-Termin etc.
           </p>
         </div>
-        <span className="pill bg-stone-50">{total} aktiv</span>
+        <span className="rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-500 tabular-nums">
+          {total} aktiv
+        </span>
       </header>
 
       {leads === null && <p className="text-stone-500">Lade…</p>}
@@ -91,21 +93,19 @@ export default function QualifiedPage() {
             const meta = LEAD_STATUS_META[s];
             const list = grouped[s];
             return (
-              <div key={s} className="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-                <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2.5">
+              <div key={s} className="flex flex-col rounded-3xl bg-stone-100/70 p-2.5">
+                <div className="flex items-center justify-between px-2 py-1.5">
                   <div className="flex items-center gap-2 text-sm font-semibold text-stone-700">
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-full ${meta.color} text-white text-xs`}>
-                      {meta.emoji}
-                    </span>
+                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: meta.accent }} />
                     <span>{meta.label}</span>
                   </div>
-                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-stone-500 tabular-nums shadow-sm">
                     {list.length}
                   </span>
                 </div>
-                <div className="flex max-h-[78vh] flex-col gap-2 overflow-y-auto p-2">
+                <div className="flex max-h-[78vh] flex-col gap-2.5 overflow-y-auto p-0.5 pt-1.5">
                   {list.length === 0 && (
-                    <p className="px-2 py-6 text-center text-xs text-stone-400">leer</p>
+                    <p className="px-2 py-8 text-center text-xs text-stone-400">leer</p>
                   )}
                   {list.map((l) => (
                     <QualifiedCard key={l.uid} lead={l} onClick={() => setOpenLead(l)} />
@@ -140,12 +140,14 @@ function QualifiedCard({ lead, onClick }: { lead: DbLead; onClick: () => void })
   const completeness = qualifiedCompleteness(q);
   const ansprechpartner = q?.ansprechpartner ?? null;
   const next = q?.naechsteSchritte ?? null;
+  const accent = LEAD_STATUS_META[lead.leadStatus ?? "new"].accent;
 
   return (
     <button
       onClick={onClick}
-      className="rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm"
+      className="group relative shrink-0 overflow-hidden rounded-2xl border border-stone-200 bg-white py-3 pl-4 pr-3 text-left text-sm transition hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)]"
     >
+      <span className="absolute inset-y-0 left-0 w-1.5" style={{ background: accent }} aria-hidden />
       <div className="flex items-start justify-between gap-2">
         <div className="line-clamp-1 font-semibold text-stone-900">{lead.firmenname}</div>
         <span
@@ -202,21 +204,21 @@ function QualifiedCard({ lead, onClick }: { lead: DbLead; onClick: () => void })
         </div>
       )}
 
-      <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-1.5 text-[10px] text-stone-400">
-        <span>{lead.ort} · {lead.dienstleistung}</span>
-        <span>
-          {lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}
-        </span>
-      </div>
-      {lead.lastSetterName && (
-        <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
+      <div className="mt-2.5 flex items-center gap-2 border-t border-stone-100 pt-2 text-[11px] text-stone-500">
+        <span className="line-clamp-1 flex-1">{lead.ort} · {lead.dienstleistung}</span>
+        {lead.lastContact && (
+          <span className="shrink-0 text-stone-400">
+            {new Date(lead.lastContact).toLocaleDateString("de-DE")}
+          </span>
+        )}
+        {lead.lastSetterName && (
           <span
-            className="h-1.5 w-1.5 rounded-full"
+            className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white"
             style={{ background: lead.lastSetterColor ?? "#525252" }}
+            title={`von ${lead.lastSetterName}`}
           />
-          von {lead.lastSetterName}
-        </div>
-      )}
+        )}
+      </div>
     </button>
   );
 }

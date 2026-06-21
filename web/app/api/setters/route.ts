@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   const guard = await requireAdmin();
   if (guard) return guard;
 
-  let body: { name?: string; pin?: string; color?: string; isAdmin?: boolean };
+  let body: { name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number };
   try {
     body = await req.json();
   } catch {
@@ -37,12 +37,16 @@ export async function POST(req: Request) {
   if (!body.name || !body.pin) {
     return NextResponse.json({ error: "name und pin sind Pflicht" }, { status: 400 });
   }
+  if (body.commissionEur !== undefined && (!Number.isFinite(body.commissionEur) || body.commissionEur < 0)) {
+    return NextResponse.json({ error: "commissionEur muss eine Zahl ≥ 0 sein" }, { status: 400 });
+  }
   try {
     const setter = await dbCreateSetter({
       name: body.name,
       pin: body.pin,
       color: body.color,
       isAdmin: body.isAdmin ?? false,
+      commissionEur: body.commissionEur,
     });
     return NextResponse.json({ setter });
   } catch (e) {
@@ -54,19 +58,23 @@ export async function PATCH(req: Request) {
   const guard = await requireAdmin();
   if (guard) return guard;
 
-  let body: { id?: number; name?: string; pin?: string; color?: string; isAdmin?: boolean };
+  let body: { id?: number; name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
   if (!body.id) return NextResponse.json({ error: "id fehlt" }, { status: 400 });
+  if (body.commissionEur !== undefined && (!Number.isFinite(body.commissionEur) || body.commissionEur < 0)) {
+    return NextResponse.json({ error: "commissionEur muss eine Zahl ≥ 0 sein" }, { status: 400 });
+  }
   try {
     await dbUpdateSetter(body.id, {
       name: body.name,
       pin: body.pin,
       color: body.color,
       isAdmin: body.isAdmin,
+      commissionEur: body.commissionEur,
     });
     return NextResponse.json({ ok: true });
   } catch (e) {

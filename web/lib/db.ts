@@ -1,5 +1,6 @@
 import postgres from "postgres";
 import type {
+  CommissionSummary,
   DbLead,
   LeaderboardRow,
   Lead,
@@ -129,6 +130,7 @@ async function runSchema(): Promise<void> {
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS next_action_at TIMESTAMPTZ`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS qualified_info JSONB`,
+    sql`ALTER TABLE setters ADD COLUMN IF NOT EXISTS commission_eur NUMERIC NOT NULL DEFAULT 0`,
     sql`
       CREATE TABLE IF NOT EXISTS lead_events (
         id SERIAL PRIMARY KEY,
@@ -616,9 +618,9 @@ export async function dbGetLead(uid: string): Promise<DbLead | null> {
 export async function dbListSetters(): Promise<Setter[]> {
   await ensureSchema();
   const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
   >`
-    SELECT id, name, color, is_admin, created_at
+    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at
     FROM setters
     ORDER BY is_admin DESC, name ASC
   `;
@@ -627,6 +629,7 @@ export async function dbListSetters(): Promise<Setter[]> {
     name: r.name,
     color: r.color,
     isAdmin: r.is_admin,
+    commissionEur: Number(r.commission_eur) || 0,
     createdAt: r.created_at,
   }));
 }
@@ -636,27 +639,36 @@ export async function dbCreateSetter(input: {
   pin: string;
   color?: string;
   isAdmin?: boolean;
+  commissionEur?: number;
 }): Promise<Setter> {
   await ensureSchema();
   const name = input.name.trim();
   const pin = input.pin.trim();
   if (!name) throw new Error("Name darf nicht leer sein");
   if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN muss 4–8 Ziffern haben");
+  const commission = Math.max(0, Number(input.commissionEur ?? 0)) || 0;
 
   const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
   >`
-    INSERT INTO setters (name, pin, color, is_admin)
-    VALUES (${name}, ${pin}, ${input.color ?? "#e11d48"}, ${input.isAdmin ?? false})
-    RETURNING id, name, color, is_admin, created_at
+    INSERT INTO setters (name, pin, color, is_admin, commission_eur)
+    VALUES (${name}, ${pin}, ${input.color ?? "#e11d48"}, ${input.isAdmin ?? false}, ${commission})
+    RETURNING id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at
   `;
   const r = rows[0];
-  return { id: r.id, name: r.name, color: r.color, isAdmin: r.is_admin, createdAt: r.created_at };
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    isAdmin: r.is_admin,
+    commissionEur: Number(r.commission_eur) || 0,
+    createdAt: r.created_at,
+  };
 }
 
 export async function dbUpdateSetter(
   id: number,
-  patch: { name?: string; pin?: string; color?: string; isAdmin?: boolean },
+  patch: { name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number },
 ): Promise<void> {
   await ensureSchema();
   const fragments: ReturnType<typeof sql>[] = [];
@@ -667,6 +679,10 @@ export async function dbUpdateSetter(
   }
   if (patch.color !== undefined) fragments.push(sql`color = ${patch.color}`);
   if (patch.isAdmin !== undefined) fragments.push(sql`is_admin = ${patch.isAdmin}`);
+  if (patch.commissionEur !== undefined) {
+    const commission = Math.max(0, Number(patch.commissionEur)) || 0;
+    fragments.push(sql`commission_eur = ${commission}`);
+  }
   if (fragments.length === 0) return;
   const setClause = fragments.reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc}, ${frag}`));
   await sql`UPDATE setters SET ${setClause} WHERE id = ${id}`;
@@ -683,9 +699,9 @@ export async function dbVerifySetterPin(
 ): Promise<Setter | null> {
   await ensureSchema();
   const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; pin: string; created_at: string }[]
+    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; pin: string; created_at: string }[]
   >`
-    SELECT id, name, color, is_admin, pin, created_at FROM setters WHERE id = ${setterId}
+    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, pin, created_at FROM setters WHERE id = ${setterId}
   `;
   const row = rows[0];
   if (!row) return null;
@@ -695,6 +711,7 @@ export async function dbVerifySetterPin(
     name: row.name,
     color: row.color,
     isAdmin: row.is_admin,
+    commissionEur: Number(row.commission_eur) || 0,
     createdAt: row.created_at,
   };
 }
@@ -702,13 +719,20 @@ export async function dbVerifySetterPin(
 export async function dbGetSetter(id: number): Promise<Setter | null> {
   await ensureSchema();
   const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; created_at: string }[]
+    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
   >`
-    SELECT id, name, color, is_admin, created_at FROM setters WHERE id = ${id}
+    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at FROM setters WHERE id = ${id}
   `;
   const r = rows[0];
   if (!r) return null;
-  return { id: r.id, name: r.name, color: r.color, isAdmin: r.is_admin, createdAt: r.created_at };
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    isAdmin: r.is_admin,
+    commissionEur: Number(r.commission_eur) || 0,
+    createdAt: r.created_at,
+  };
 }
 
 export async function dbCountSetters(): Promise<number> {
@@ -771,6 +795,63 @@ export async function dbLeaderboard(sinceIso: string | null): Promise<Leaderboar
     totalSet: Number(r.interested) + Number(r.call_scheduled),
     totalCalls: Number(r.total_calls),
   }));
+}
+
+// =============================================================================
+// PROVISIONEN – was jeder Setter pro Abschluss bekommt, abgeleitet aus won-Events
+// =============================================================================
+
+/**
+ * Provisions-Übersicht aller Setter. Zählt abgeschlossene Deals ("won"-Events)
+ * pro Setter – einmal für den laufenden Kalendermonat, einmal all-time – und
+ * multipliziert mit dem individuellen Provisionssatz.
+ *
+ * `COUNT(DISTINCT lead_uid)` statt `COUNT(*)`, damit ein Lead, der mehrmals auf
+ * "won" gesetzt wurde (z.B. zurückgesetzt + erneut geschlossen), nicht doppelt
+ * abgerechnet wird.
+ */
+export async function dbCommissions(): Promise<CommissionSummary[]> {
+  await ensureSchema();
+  const rows = await sql<
+    {
+      setter_id: number;
+      name: string;
+      color: string;
+      commission_eur: number;
+      won_month: number;
+      won_total: number;
+    }[]
+  >`
+    SELECT
+      s.id    AS setter_id,
+      s.name,
+      s.color,
+      s.commission_eur::float8 AS commission_eur,
+      COUNT(DISTINCT e.lead_uid) FILTER (
+        WHERE e.to_status = 'won' AND e.ts >= date_trunc('month', now())
+      )::int AS won_month,
+      COUNT(DISTINCT e.lead_uid) FILTER (WHERE e.to_status = 'won')::int AS won_total
+    FROM setters s
+    LEFT JOIN lead_events e ON e.setter_id = s.id
+    GROUP BY s.id, s.name, s.color, s.commission_eur
+    ORDER BY won_month DESC, s.name ASC
+  `;
+
+  return rows.map((r) => {
+    const rateEur = Number(r.commission_eur) || 0;
+    const wonMonth = Number(r.won_month);
+    const wonTotal = Number(r.won_total);
+    return {
+      setterId: r.setter_id,
+      name: r.name,
+      color: r.color,
+      rateEur,
+      wonMonth,
+      wonTotal,
+      monthEur: rateEur * wonMonth,
+      totalEur: rateEur * wonTotal,
+    };
+  });
 }
 
 // =============================================================================

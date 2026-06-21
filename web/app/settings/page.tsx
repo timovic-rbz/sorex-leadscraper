@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Setter } from "@/lib/types";
+import type { CommissionSummary, Setter } from "@/lib/types";
 
 interface ProviderEntry {
   id: string;
@@ -83,6 +83,16 @@ export default function SettingsPage() {
       </section>
 
       <section className="mt-12 space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">💶 Provisionen</h2>
+        <p className="text-sm text-stone-500">
+          Was jeder Setter diesen Monat aus seinen Abschlüssen verdient hat. Ergibt sich
+          automatisch aus jedem Lead, der auf <span className="font-medium">„Kunde"</span> gesetzt
+          wurde × dem Provisionssatz des Setters (unten im Team einstellbar).
+        </p>
+        <CommissionSection />
+      </section>
+
+      <section className="mt-12 space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Team (Setter)</h2>
         <p className="text-sm text-stone-500">
           Wer darf sich einloggen und Leads bearbeiten? Setter sehen nur Listen + Leaderboard.
@@ -90,6 +100,89 @@ export default function SettingsPage() {
         </p>
         <TeamSection />
       </section>
+    </div>
+  );
+}
+
+// ============================================================================
+// Provisions-Übersicht (Admin)
+// ============================================================================
+
+function CommissionSection() {
+  const [team, setTeam] = useState<CommissionSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/commission")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = (await r.json()) as { team: CommissionSummary[] | null };
+        setTeam(d.team ?? []);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  if (error) {
+    return (
+      <div className="card border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">❌ {error}</div>
+    );
+  }
+  if (team === null) return <p className="text-sm text-stone-500">Lade...</p>;
+
+  const monthLabel = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const monthTotal = team.reduce((acc, c) => acc + c.monthEur, 0);
+  const monthDeals = team.reduce((acc, c) => acc + c.wonMonth, 0);
+  // Setter ohne Abschlüsse diesen Monat ans Ende, aber weiterhin auflisten
+  const sorted = [...team].sort((a, b) => b.monthEur - a.monthEur || b.wonMonth - a.wonMonth);
+
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-amber-50 to-emerald-50 p-5">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+            Auszuzahlen · {monthLabel}
+          </div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-stone-900">
+            {formatEur(monthTotal)}
+          </div>
+          <div className="mt-1 text-xs text-stone-500">{monthDeals} Abschlüsse im Team</div>
+        </div>
+        <div className="text-right text-xs text-stone-500">
+          Provision = Abschlüsse × Satz<br />pro Setter
+        </div>
+      </div>
+
+      {sorted.length === 0 && (
+        <div className="card p-6 text-center text-sm text-stone-500">
+          Noch kein Team angelegt.
+        </div>
+      )}
+
+      {sorted.map((c) => (
+        <div key={c.setterId} className="card flex items-center gap-3 p-4">
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+            style={{ background: c.color }}
+          >
+            {c.name
+              .split(/\s+/)
+              .map((p) => p[0])
+              .slice(0, 2)
+              .join("")
+              .toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-semibold">{c.name}</div>
+            <div className="text-xs text-stone-500">
+              {formatEur(c.rateEur)}/Abschluss · {c.wonMonth}× diesen Monat · {c.wonTotal}× gesamt
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-lg font-bold tabular-nums text-emerald-700">{formatEur(c.monthEur)}</div>
+            <div className="text-[10px] uppercase tracking-wider text-stone-400">diesen Monat</div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -516,12 +609,19 @@ function SetterRow({
   const [pin, setPin] = useState("");
   const [color, setColor] = useState(setter.color);
   const [isAdmin, setIsAdmin] = useState(setter.isAdmin);
+  const [commission, setCommission] = useState(String(setter.commissionEur ?? 0));
   const [busy, setBusy] = useState(false);
 
   async function save() {
     setBusy(true);
     try {
-      const body: Record<string, unknown> = { id: setter.id, name, color, isAdmin };
+      const body: Record<string, unknown> = {
+        id: setter.id,
+        name,
+        color,
+        isAdmin,
+        commissionEur: Number(commission.replace(",", ".")) || 0,
+      };
       if (pin) body.pin = pin;
       const r = await fetch("/api/setters", {
         method: "PATCH",
@@ -556,13 +656,19 @@ function SetterRow({
             .toUpperCase()}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{setter.name}</span>
             {setter.isAdmin && (
               <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
                 Admin
               </span>
             )}
+            <span
+              className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
+              title="Provision pro Abschluss"
+            >
+              💶 {formatEur(setter.commissionEur)}/Abschluss
+            </span>
           </div>
           <div className="text-xs text-stone-500">
             angelegt {new Date(setter.createdAt).toLocaleDateString("de-DE")}
@@ -611,6 +717,19 @@ function SetterRow({
           ))}
         </div>
       </div>
+      <label className="block max-w-[240px]">
+        <span className="label-base">Provision pro Abschluss (€)</span>
+        <input
+          className="input-base"
+          type="number"
+          min={0}
+          step="0.01"
+          inputMode="decimal"
+          value={commission}
+          onChange={(e) => setCommission(e.target.value)}
+          placeholder="z.B. 50"
+        />
+      </label>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
         Admin-Rechte (Suche + Einstellungen)
@@ -632,6 +751,7 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
   const [pin, setPin] = useState("");
   const [color, setColor] = useState(COLOR_PALETTE[0]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [commission, setCommission] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -642,7 +762,13 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
       const r = await fetch("/api/setters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, pin, color, isAdmin }),
+        body: JSON.stringify({
+          name,
+          pin,
+          color,
+          isAdmin,
+          commissionEur: Number(commission.replace(",", ".")) || 0,
+        }),
       });
       const d = (await r.json()) as { error?: string };
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
@@ -686,6 +812,19 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
           ))}
         </div>
       </div>
+      <label className="block max-w-[240px]">
+        <span className="label-base">Provision pro Abschluss (€)</span>
+        <input
+          className="input-base"
+          type="number"
+          min={0}
+          step="0.01"
+          inputMode="decimal"
+          value={commission}
+          onChange={(e) => setCommission(e.target.value)}
+          placeholder="z.B. 50"
+        />
+      </label>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
         Admin-Rechte

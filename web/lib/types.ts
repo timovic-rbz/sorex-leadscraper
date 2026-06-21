@@ -21,15 +21,18 @@ export const LEAD_STATUS_ORDER: LeadStatus[] = [
   "lost",
 ];
 
-export const LEAD_STATUS_META: Record<LeadStatus, { label: string; emoji: string; color: string }> = {
-  new:             { label: "Neu",              emoji: "🆕", color: "bg-blue-600" },
-  no_answer:       { label: "Nicht erreicht",   emoji: "📵", color: "bg-yellow-600" },
-  follow_up:       { label: "Wiedervorlage",    emoji: "🔄", color: "bg-cyan-600" },
-  interested:      { label: "Interessiert",     emoji: "🔥", color: "bg-orange-600" },
-  call_scheduled:  { label: "Call vereinbart",  emoji: "📅", color: "bg-purple-600" },
-  won:             { label: "Kunde",            emoji: "🏆", color: "bg-green-600" },
-  not_interested:  { label: "Kein Interesse",   emoji: "❌", color: "bg-neutral-700" },
-  lost:            { label: "Verloren",         emoji: "🪦", color: "bg-neutral-700" },
+export const LEAD_STATUS_META: Record<
+  LeadStatus,
+  { label: string; emoji: string; color: string; accent: string }
+> = {
+  new:             { label: "Neu",              emoji: "🆕", color: "bg-blue-600",    accent: "#3b82f6" },
+  no_answer:       { label: "Nicht erreicht",   emoji: "📵", color: "bg-yellow-600",  accent: "#eab308" },
+  follow_up:       { label: "Wiedervorlage",    emoji: "🔄", color: "bg-cyan-600",    accent: "#06b6d4" },
+  interested:      { label: "Interessiert",     emoji: "🔥", color: "bg-orange-600",  accent: "#f97316" },
+  call_scheduled:  { label: "Call vereinbart",  emoji: "📅", color: "bg-purple-600",  accent: "#8b5cf6" },
+  won:             { label: "Kunde",            emoji: "🏆", color: "bg-green-600",   accent: "#22c55e" },
+  not_interested:  { label: "Kein Interesse",   emoji: "❌", color: "bg-neutral-700", accent: "#404040" },
+  lost:            { label: "Verloren",         emoji: "🪦", color: "bg-neutral-700", accent: "#94a3b8" },
 };
 
 export interface Lead {
@@ -100,7 +103,26 @@ export interface Setter {
   name: string;
   color: string;
   isAdmin: boolean;
+  /** Provision, die der Setter pro Abschluss (Lead → "Kunde") bekommt, in Euro. */
+  commissionEur: number;
   createdAt: string;
+}
+
+/** Provisions-Übersicht eines Setters (abgeleitet aus den won-Events). */
+export interface CommissionSummary {
+  setterId: number;
+  name: string;
+  color: string;
+  /** Provision pro Abschluss (€). */
+  rateEur: number;
+  /** Abschlüsse im laufenden Kalendermonat. */
+  wonMonth: number;
+  /** Abschlüsse insgesamt (all-time). */
+  wonTotal: number;
+  /** rateEur × wonMonth. */
+  monthEur: number;
+  /** rateEur × wonTotal. */
+  totalEur: number;
 }
 
 export interface SessionInfo {

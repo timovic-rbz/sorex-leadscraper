@@ -158,9 +158,10 @@ function ListCard({ list, onDelete }: { list: ListWithStats; onDelete: () => voi
           return (
             <div
               key={s}
-              className={`flex flex-col items-center justify-center rounded-lg py-2 text-xs transition ${
-                filled ? meta.color + " text-white" : "bg-stone-100 text-stone-400"
+              className={`flex flex-col items-center justify-center rounded-xl py-2 text-xs transition ${
+                filled ? "text-white" : "bg-stone-100 text-stone-400"
               }`}
+              style={filled ? { background: meta.accent } : undefined}
               title={`${meta.label}: ${count}`}
             >
               <div className="text-base leading-none">{meta.emoji}</div>

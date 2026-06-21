@@ -152,15 +152,17 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="mx-auto max-w-[1900px] p-4 lg:p-6">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
+      <header className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Link href="/lists" className="rounded-full bg-white border border-stone-200 px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-50">
-            ← Listen
+          <Link href="/lists" className="inline-flex items-center gap-1 rounded-full bg-white border border-stone-200 px-3.5 py-2 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+            ‹ Listen
           </Link>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{data.list.name}</h1>
-          <span className="pill bg-stone-50">{data.leads.length} Leads</span>
+          <span className="rounded-full bg-stone-100 px-3 py-1 text-sm font-medium text-stone-500 tabular-nums">
+            {data.leads.length} Leads
+          </span>
         </div>
-        <Link href="/" className="btn-ghost h-9">+ Mehr Leads suchen</Link>
+        <Link href="/" className="btn-primary">+ Mehr Leads suchen</Link>
       </header>
 
       {/* Website-Filter (Segmented Control) */}
@@ -187,9 +189,8 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
-      {/* Status-Filter-Leiste: aktive Status sind sichtbar, ausgegraute kollabieren */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-stone-500">Anzeigen:</span>
+      {/* Status-Filter-Leiste: outline-Chips mit Status-Punkt; ausgegraute kollabieren */}
+      <div className="mb-5 flex flex-wrap items-center gap-2 text-sm">
         {LEAD_STATUS_ORDER.map((s) => {
           const meta = LEAD_STATUS_META[s];
           const count = grouped[s].length;
@@ -198,18 +199,21 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             <button
               key={s}
               onClick={() => toggleHidden(s)}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium transition ${
+              className={`group inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-medium transition ${
                 isHidden
-                  ? "border-stone-200 bg-white text-stone-400 hover:text-stone-700"
-                  : "border-transparent text-white shadow-sm " + meta.color
+                  ? "border-stone-200 bg-white text-stone-400 hover:border-stone-300 hover:text-stone-600"
+                  : "border-stone-200 bg-white text-stone-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-stone-300"
               }`}
               title={isHidden ? `${meta.label} einblenden` : `${meta.label} ausblenden`}
             >
-              <span>{meta.emoji}</span>
+              <span
+                className="h-2.5 w-2.5 rounded-full transition"
+                style={{ background: isHidden ? "#d6d3d1" : meta.accent }}
+              />
               <span>{meta.label}</span>
               <span
-                className={`rounded-full px-1.5 text-[10px] tabular-nums ${
-                  isHidden ? "bg-stone-100" : "bg-white/25"
+                className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+                  isHidden ? "bg-stone-100 text-stone-400" : "bg-stone-100 text-stone-600"
                 }`}
               >
                 {count}
@@ -221,7 +225,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
       {/* Kanban – horizontal scrollbar mit min-Width pro Spalte */}
       <div className="-mx-4 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0">
-        <div className="flex gap-3 min-w-fit">
+        <div className="flex gap-3.5 min-w-fit">
           {LEAD_STATUS_ORDER.map((status) => {
             const meta = LEAD_STATUS_META[status];
             const leads = grouped[status];
@@ -234,17 +238,15 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 <button
                   key={status}
                   onClick={() => toggleHidden(status)}
-                  className="flex w-10 shrink-0 flex-col items-center gap-2 rounded-2xl border border-stone-200 bg-stone-50/60 py-3 text-xs text-stone-500 transition hover:bg-stone-100"
+                  className="flex w-11 shrink-0 flex-col items-center gap-2 rounded-3xl bg-stone-100/70 py-3 text-xs text-stone-500 transition hover:bg-stone-200/70"
                   title="Einblenden"
                 >
-                  <span className={`flex h-6 w-6 items-center justify-center rounded-full ${meta.color} text-white text-xs`}>
-                    {meta.emoji}
-                  </span>
-                  <span className="rounded-full bg-stone-100 px-1.5 py-0.5 tabular-nums">
+                  <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: meta.accent }} />
+                  <span className="rounded-full bg-white px-1.5 py-0.5 tabular-nums shadow-sm">
                     {leads.length}
                   </span>
                   <span
-                    className="mt-1 whitespace-nowrap text-stone-400"
+                    className="mt-1 whitespace-nowrap font-medium text-stone-500"
                     style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
                   >
                     {meta.label}
@@ -256,24 +258,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             return (
               <div
                 key={status}
-                className={`flex w-72 shrink-0 flex-col rounded-2xl border border-stone-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:w-80 ${
-                  isEmpty ? "bg-stone-50/40" : "bg-white"
-                }`}
+                className="flex w-72 shrink-0 flex-col rounded-3xl bg-stone-100/70 p-2.5 sm:w-80"
               >
-                <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2.5">
+                <div className="flex items-center justify-between px-2 py-1.5">
                   <div className="flex items-center gap-2 text-sm font-semibold text-stone-700">
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-full ${meta.color} text-white text-xs`}>
-                      {meta.emoji}
-                    </span>
+                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: meta.accent }} />
                     <span className="truncate">{meta.label}</span>
                   </div>
-                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-stone-500 tabular-nums shadow-sm">
                     {leads.length}
                   </span>
                 </div>
-                <div className="flex max-h-[72vh] flex-col gap-2 overflow-y-auto p-2">
+                <div className="flex max-h-[72vh] flex-col gap-2.5 overflow-y-auto p-0.5 pt-1.5">
                   {isEmpty && (
-                    <p className="px-2 py-6 text-center text-xs text-stone-400">noch leer</p>
+                    <p className="px-2 py-8 text-center text-xs text-stone-400">noch leer</p>
                   )}
                   {leads.map((l) => (
                     <LeadCard key={l.uid} lead={l} onClick={() => setOpenLead(l)} />
@@ -339,8 +337,9 @@ function WebsitePill({
 }
 
 function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
-  const noWebsite = !lead.webseite;
-  const today = parseTodayHours(lead.oeffnungszeiten);
+  const today = getTodayHours(lead.oeffnungszeiten);
+  const accent = LEAD_STATUS_META[lead.leadStatus ?? "new"].accent;
+  const footer = leadFooter(lead);
   return (
     <div
       role="button"
@@ -352,14 +351,20 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
           onClick();
         }
       }}
-      className="cursor-pointer rounded-xl border border-stone-200 bg-white p-3 text-left text-sm transition hover:border-rose-200 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-200"
+      className="group relative shrink-0 cursor-pointer overflow-hidden rounded-2xl border border-stone-200 bg-white py-3 pl-4 pr-3 text-left text-sm transition hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-[0_6px_16px_rgba(0,0,0,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-200"
     >
-      {/* Name – darf 2 Zeilen brauchen, danach Ellipsis. G-Button rechts daneben. */}
+      {/* Farbiger Status-Akzent am linken Rand */}
+      <span className="absolute inset-y-0 left-0 w-1.5" style={{ background: accent }} aria-hidden />
+
+      {/* Name (max. 2 Zeilen) + Website-/Google-Buttons rechts */}
       <div className="flex items-start justify-between gap-2">
         <div className="line-clamp-2 flex-1 font-semibold leading-snug text-stone-900">
           {lead.firmenname}
         </div>
-        <GoogleProfileButton name={lead.firmenname} ort={lead.ort} size="sm" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {lead.webseite && <GlobeLink href={lead.webseite} />}
+          <GoogleProfileButton name={lead.firmenname} ort={lead.ort} size="sm" />
+        </div>
       </div>
 
       {/* Telefon: ganze Zeile, Whitespace nicht brechen */}
@@ -372,58 +377,134 @@ function LeadCard({ lead, onClick }: { lead: DbLead; onClick: () => void }) {
         </div>
       )}
 
-      {/* Inline-Chips: Öffnungszeiten heute + "keine Website" */}
-      {(today || noWebsite) && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {today && (
-            <span
-              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                today.closed ? "bg-stone-100 text-stone-500" : "bg-emerald-50 text-emerald-700"
-              }`}
-            >
-              🕒 {today.label}
-            </span>
-          )}
-          {noWebsite && (
-            <span
-              title="Kein Webauftritt"
-              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
-            >
-              🌐✗ keine Website
-            </span>
-          )}
+      {/* Öffnungszeiten heute (live geöffnet/zu) */}
+      {today && (
+        <div className="mt-2">
+          <OpenNowChip today={today} />
         </div>
       )}
 
+      {/* Adresse mit Pin-Icon */}
       {lead.adresse && (
-        <div className="mt-2 line-clamp-1 text-[11px] text-stone-500">{lead.adresse}</div>
-      )}
-
-      {/* Footer: Anruf-Status + Datum + Setter-Badge in einer Zeile */}
-      <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-stone-100 pt-2 text-[10px] text-stone-400">
-        <span className="truncate">
-          {lead.callCount > 0 ? `${lead.callCount}× angerufen` : "noch nicht versucht"}
-        </span>
-        <span className="shrink-0">
-          {lead.lastContact && new Date(lead.lastContact).toLocaleDateString("de-DE")}
-        </span>
-      </div>
-      {lead.lastSetterName && (
-        <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-medium text-stone-600">
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ background: lead.lastSetterColor ?? "#525252" }}
-          />
-          von {lead.lastSetterName}
+        <div className="mt-2 flex items-start gap-1.5 text-[11px] text-stone-500">
+          <PinIcon />
+          <span className="line-clamp-1">{lead.adresse}</span>
         </div>
       )}
+
+      {/* Fußzeile: Status-Punkt + adaptiver Kontext (Notiz / Wiedervorlage / Versuche) */}
+      <div className="mt-2.5 flex items-center gap-2 border-t border-stone-100 pt-2 text-[11px] text-stone-500">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: accent }} aria-hidden />
+        <span className="line-clamp-1 flex-1">{footer}</span>
+        {lead.lastSetterName && (
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white"
+            style={{ background: lead.lastSetterColor ?? "#525252" }}
+            title={`von ${lead.lastSetterName}`}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Adaptive Kontextzeile für die Karte: zeigt das jeweils Relevanteste. */
+function leadFooter(lead: DbLead): string {
+  const status = lead.leadStatus ?? "new";
+  if ((status === "follow_up" || status === "call_scheduled") && lead.nextActionAt) {
+    const label = status === "call_scheduled" ? "Call" : "Wiedervorlage";
+    return `${label} ${fmtRelDateTime(lead.nextActionAt)}`;
+  }
+  const note = lead.notes?.trim();
+  if (note) return note;
+  if (lead.callCount > 0) {
+    const when = lead.lastContact ? ` · ${fmtRelDateTime(lead.lastContact)}` : "";
+    return `${lead.callCount}× versucht${when}`;
+  }
+  return "noch nicht versucht";
+}
+
+/** "heute 11:24" / "gestern 16:10" / "morgen 14:00" / "12.05. 14:00". */
+function fmtRelDateTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const day0 = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day0(d) - day0(now)) / 86_400_000);
+  const time = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const day =
+    diff === 0 ? "heute"
+    : diff === -1 ? "gestern"
+    : diff === 1 ? "morgen"
+    : d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  return `${day} ${time}`;
+}
+
+function GlobeLink({ href }: { href: string }) {
+  const url = /^https?:\/\//i.test(href) ? href : `https://${href}`;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title="Webseite öffnen"
+      className="flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+    >
+      <GlobeIcon />
+    </a>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z" />
+    </svg>
+  );
+}
+
+function PinIcon() {
+  return (
+    <svg className="mt-px shrink-0 text-stone-400" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
   );
 }
 
 const DAY_NAMES_DE = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
 
-function parseTodayHours(raw: string | null | undefined): { label: string; closed: boolean } | null {
+interface TodayHours {
+  /** Rohwert der heutigen Zeiten, z.B. "09:00–17:00" oder "geschlossen". */
+  label: string;
+  /** Heute ganztägig geschlossen. */
+  closedAllDay: boolean;
+  /** Gerade jetzt geöffnet (anhand der lokalen Uhrzeit). */
+  openNow: boolean;
+  /** Wenn jetzt geöffnet: wann heute geschlossen wird. */
+  closesAt: string | null;
+  /** Wenn jetzt zu, aber heute noch eine Öffnung kommt: nächste Öffnungszeit. */
+  opensAt: string | null;
+}
+
+/**
+ * Parst die heutigen Öffnungszeiten aus dem Google-Format
+ * ("Montag: 09:00–17:00 | Dienstag: …") und berechnet, ob gerade geöffnet ist.
+ * Liefert null, wenn es keine verwertbaren Zeiten für heute gibt
+ * (z.B. OSM-Format ohne Wochentag-Prefix).
+ */
+function getTodayHours(raw: string | null | undefined): TodayHours | null {
   if (!raw) return null;
   const todayName = DAY_NAMES_DE[new Date().getDay()];
   const parts = raw.split("|").map((p) => p.trim());
@@ -431,8 +512,83 @@ function parseTodayHours(raw: string | null | undefined): { label: string; close
   if (!todayPart) return null;
   const value = todayPart.slice(todayPart.indexOf(":") + 1).trim().replace(/\s*Uhr\s*$/i, "");
   if (!value) return null;
-  const closed = /geschlossen/i.test(value);
-  return { label: closed ? "geschlossen" : value, closed };
+  if (/geschlossen/i.test(value)) {
+    return { label: "geschlossen", closedAllDay: true, openNow: false, closesAt: null, opensAt: null };
+  }
+
+  // Alle HH:MM–HH:MM Bereiche heraussammeln (Bindestrich, Halbgeviert- oder Geviertstrich).
+  const ranges: { start: number; end: number; startLabel: string; endLabel: string }[] = [];
+  const re = /(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(value)) !== null) {
+    ranges.push({
+      start: +m[1] * 60 + +m[2],
+      end: +m[3] * 60 + +m[4],
+      startLabel: `${m[1].padStart(2, "0")}:${m[2]}`,
+      endLabel: `${m[3].padStart(2, "0")}:${m[4]}`,
+    });
+  }
+  if (ranges.length === 0) {
+    // Zeiten nicht parsebar → wenigstens Rohwert anzeigen, ohne Live-Status.
+    return { label: value, closedAllDay: false, openNow: false, closesAt: null, opensAt: null };
+  }
+
+  const now = new Date().getHours() * 60 + new Date().getMinutes();
+  const current = ranges.find((r) => now >= r.start && now < r.end) ?? null;
+  const upcoming = current
+    ? null
+    : ranges.filter((r) => r.start > now).sort((a, b) => a.start - b.start)[0] ?? null;
+  return {
+    label: value,
+    closedAllDay: false,
+    openNow: !!current,
+    closesAt: current?.endLabel ?? null,
+    opensAt: upcoming?.startLabel ?? null,
+  };
+}
+
+/** Kompakter Chip für die Kanban-Karte: Live-Status der heutigen Öffnungszeiten. */
+function OpenNowChip({ today }: { today: TodayHours }) {
+  let cls = "bg-stone-100 text-stone-500";
+  let text = today.label;
+  if (today.openNow) {
+    cls = "bg-emerald-50 text-emerald-700";
+    text = today.closesAt ? `geöffnet · bis ${today.closesAt}` : "geöffnet";
+  } else if (today.opensAt) {
+    cls = "bg-amber-50 text-amber-700";
+    text = `öffnet ${today.opensAt}`;
+  } else if (today.closedAllDay) {
+    text = "geschlossen";
+  }
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium ${cls}`}>
+      <ClockIcon />
+      {text}
+    </span>
+  );
+}
+
+/** Prominentes Badge im Lead-Modal: lohnt sich ein Anruf gerade jetzt? */
+function OpenNowBadge({ today }: { today: TodayHours }) {
+  if (today.openNow) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+        Jetzt geöffnet{today.closesAt && ` · bis ${today.closesAt}`}
+      </span>
+    );
+  }
+  const text = today.opensAt
+    ? `Geschlossen · öffnet ${today.opensAt}`
+    : today.closedAllDay
+      ? "Heute geschlossen"
+      : `Geschlossen · ${today.label}`;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-500 ring-1 ring-stone-200">
+      <span className="h-2 w-2 rounded-full bg-stone-400" />
+      {text}
+    </span>
+  );
 }
 
 // ============================================================================
@@ -517,6 +673,31 @@ function LeadModal({
   }
 
   const currentMeta = LEAD_STATUS_META[lead.leadStatus ?? "new"];
+  const today = getTodayHours(lead.oeffnungszeiten);
+
+  // Tastenkürzel fürs schnelle Abtelefonieren: 1–5 = Anruf-Resultat, Esc = schließen.
+  // Greift nicht, während in einem Eingabefeld (Notizen/Termin) getippt wird.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (busy || e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case "1": e.preventDefault(); setStatus("no_answer"); break;
+        case "2": e.preventDefault(); scheduleFollowUp(); break;
+        case "3": e.preventDefault(); setStatus("interested"); break;
+        case "4": e.preventDefault(); setStatus("won"); break;
+        case "5": e.preventDefault(); setStatus("not_interested"); break;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, notes, nextActionAt]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -557,6 +738,11 @@ function LeadModal({
 
         {/* Hauptaktion: Telefon */}
         <div className="space-y-3 border-b border-stone-100 px-6 py-5">
+          {today && (
+            <div>
+              <OpenNowBadge today={today} />
+            </div>
+          )}
           {lead.telefon ? (
             <a
               href={`tel:${lead.telefon}`}
@@ -598,21 +784,24 @@ function LeadModal({
 
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
-          <div className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-500">📞 Anruf-Resultat</div>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-stone-500">📞 Anruf-Resultat</span>
+            <span className="hidden text-[10px] text-stone-400 sm:inline">Tasten 1–5 · Esc schließt</span>
+          </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            <StatusButton color="bg-yellow-500 hover:bg-yellow-600" onClick={() => setStatus("no_answer")} disabled={busy}>
+            <StatusButton color="bg-yellow-500 hover:bg-yellow-600" onClick={() => setStatus("no_answer")} disabled={busy} shortcut="1">
               📵 Nicht erreicht
             </StatusButton>
-            <StatusButton color="bg-cyan-600 hover:bg-cyan-700" onClick={scheduleFollowUp} disabled={busy}>
+            <StatusButton color="bg-cyan-600 hover:bg-cyan-700" onClick={scheduleFollowUp} disabled={busy} shortcut="2">
               🔄 Wiedervorlage
             </StatusButton>
-            <StatusButton color="bg-orange-500 hover:bg-orange-600" onClick={() => setStatus("interested")} disabled={busy}>
+            <StatusButton color="bg-orange-500 hover:bg-orange-600" onClick={() => setStatus("interested")} disabled={busy} shortcut="3">
               🔥 Interessiert
             </StatusButton>
-            <StatusButton color="bg-emerald-600 hover:bg-emerald-700" onClick={() => setStatus("won")} disabled={busy}>
+            <StatusButton color="bg-emerald-600 hover:bg-emerald-700" onClick={() => setStatus("won")} disabled={busy} shortcut="4">
               🏆 Kunde
             </StatusButton>
-            <StatusButton color="bg-stone-700 hover:bg-stone-800" onClick={() => setStatus("not_interested")} disabled={busy}>
+            <StatusButton color="bg-stone-700 hover:bg-stone-800" onClick={() => setStatus("not_interested")} disabled={busy} shortcut="5">
               ❌ Kein Interesse
             </StatusButton>
           </div>
@@ -708,9 +897,14 @@ function InfoPanel({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusButton({ color, onClick, children, disabled }: { color: string; onClick: () => void; children: React.ReactNode; disabled?: boolean }) {
+function StatusButton({ color, onClick, children, disabled, shortcut }: { color: string; onClick: () => void; children: React.ReactNode; disabled?: boolean; shortcut?: string }) {
   return (
-    <button onClick={onClick} disabled={disabled} className={`rounded-full ${color} px-3 py-2.5 text-sm font-medium text-white transition disabled:opacity-50`}>
+    <button onClick={onClick} disabled={disabled} className={`relative rounded-full ${color} px-3 py-2.5 text-sm font-medium text-white transition disabled:opacity-50`}>
+      {shortcut && (
+        <kbd className="absolute left-1.5 top-1.5 hidden h-4 w-4 items-center justify-center rounded bg-white/25 text-[10px] font-bold tabular-nums sm:flex">
+          {shortcut}
+        </kbd>
+      )}
       {children}
     </button>
   );
