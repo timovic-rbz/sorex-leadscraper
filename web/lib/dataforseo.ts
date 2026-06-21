@@ -60,6 +60,26 @@ interface DfsResponse {
 }
 
 /**
+ * Macht aus einem DataForSEO-HTTP-Fehler eine verständliche, handlungsweisende
+ * Meldung – statt den rohen JSON-Body durchzureichen. 401 = Login falsch/leer,
+ * 402 = kein Guthaben.
+ */
+async function dfsHttpError(label: string, r: Response): Promise<Error> {
+  if (r.status === 401) {
+    return new Error(
+      "DataForSEO-Login abgelehnt (401). Bitte unter Einstellungen → DataForSEO die Zugangsdaten " +
+        "im Format login:passwort prüfen. Wichtig: das API-Passwort von app.dataforseo.com/api-access " +
+        "verwenden – NICHT das normale Account-Passwort.",
+    );
+  }
+  if (r.status === 402) {
+    return new Error("DataForSEO: Kein Guthaben mehr (402). Bitte den Account aufladen.");
+  }
+  const body = (await r.text().catch(() => "")).slice(0, 160);
+  return new Error(`${label} ${r.status}: ${body}`);
+}
+
+/**
  * Lead-Suche über DataForSEO (Google-Maps-SERP). Spiegelt das Verhalten von
  * searchGoogle: "Dienstleistung in Ort" → Liste von Firmen-Leads.
  *
@@ -98,10 +118,7 @@ export async function searchDataForSeo(
     ]),
   });
 
-  if (!r.ok) {
-    // 401 = falsche Credentials, 402 = kein Guthaben – Text durchreichen.
-    throw new Error(`DataForSEO ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  }
+  if (!r.ok) throw await dfsHttpError("DataForSEO", r);
 
   const data = (await r.json()) as DfsResponse;
   const task = data.tasks?.[0];
@@ -263,9 +280,7 @@ export async function getBusinessProfile(
     body: JSON.stringify([{ keyword, language_code: "de", location_code: LOCATION_CODE_DE }]),
   });
 
-  if (!r.ok) {
-    throw new Error(`DataForSEO ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  }
+  if (!r.ok) throw await dfsHttpError("DataForSEO", r);
 
   const data = (await r.json()) as DfsBizResponse;
   const task = data.tasks?.[0];
@@ -451,7 +466,7 @@ async function runOnPage(
     headers,
     body: JSON.stringify([{ url, enable_javascript: false }]),
   });
-  if (!r.ok) throw new Error(`DataForSEO OnPage ${r.status}: ${(await r.text()).slice(0, 150)}`);
+  if (!r.ok) throw await dfsHttpError("DataForSEO OnPage", r);
   const data = (await r.json()) as DfsOnPageResponse;
   const task = data.tasks?.[0];
   if (!task || task.status_code !== 20000) {
@@ -508,7 +523,7 @@ async function runLighthouse(
       body: JSON.stringify([{ url, for_mobile: false }]),
       signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error(`DataForSEO Lighthouse ${r.status}`);
+    if (!r.ok) throw await dfsHttpError("DataForSEO Lighthouse", r);
     const data = (await r.json()) as DfsLhResponse;
     const task = data.tasks?.[0];
     if (!task || task.status_code !== 20000) {
