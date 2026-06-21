@@ -1,4 +1,11 @@
-import type { BusinessProfile, Lead, MarketCheck, ReviewItem, WebsiteCheck } from "./types";
+import type {
+  BusinessProfile,
+  CompetitorCheck,
+  Lead,
+  MarketCheck,
+  ReviewItem,
+  WebsiteCheck,
+} from "./types";
 import { getApiKey } from "./api-keys";
 import {
   recordDataForSeoLighthouse,
@@ -703,6 +710,54 @@ async function runSearchVolume(
     searchVolume: item?.search_volume ?? null,
     competition: item?.competition ?? "",
     cpc: item?.cpc ?? null,
+  };
+}
+
+// =============================================================================
+// KONKURRENZ – lokaler Maps-Vergleich (Bewertung, Reviews, Website ja/nein)
+// =============================================================================
+
+/**
+ * Konkurrenz-Vergleich aus dem lokalen Google-Maps-Umfeld. Nutzt dieselbe
+ * Maps-Suche wie das Scrapen (ein Call, ~0,2 ct) und stellt den Lead seinen
+ * Mitbewerbern gegenüber (Bewertung, Anzahl Reviews, Website ja/nein).
+ */
+export async function getCompetitors(
+  service: string,
+  city: string,
+  selfName?: string,
+): Promise<CompetitorCheck> {
+  const leads = await searchDataForSeo(service, city, 20);
+  const norm = (s: string) => s.trim().toLowerCase();
+  const self = selfName ? norm(selfName) : "";
+
+  const competitors = leads.map((l) => ({
+    name: l.firmenname,
+    rating: l.bewertung ? Number(l.bewertung) || null : null,
+    reviews: l.anzahlReviews ?? 0,
+    hasWebsite: Boolean(l.webseite),
+    isSelf: self !== "" && norm(l.firmenname) === self,
+  }));
+
+  const rated = competitors.filter((c) => c.rating != null);
+  const avgRating = rated.length
+    ? rated.reduce((a, c) => a + (c.rating ?? 0), 0) / rated.length
+    : null;
+  const withWebsite = competitors.filter((c) => c.hasWebsite).length;
+
+  // Nach Bewertung (dann Review-Anzahl) sortieren = "Qualitäts-Ranking" des Felds.
+  const sorted = [...competitors].sort(
+    (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || b.reviews - a.reviews,
+  );
+  const selfIdx = sorted.findIndex((c) => c.isSelf);
+
+  return {
+    keyword: `${service} ${city}`.trim(),
+    total: competitors.length,
+    avgRating: avgRating != null ? Math.round(avgRating * 10) / 10 : null,
+    withWebsite,
+    selfRank: selfIdx >= 0 ? selfIdx + 1 : null,
+    competitors: sorted.slice(0, 8),
   };
 }
 

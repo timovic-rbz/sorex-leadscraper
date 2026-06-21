@@ -137,6 +137,31 @@ export interface ReviewItem {
   author: string;
 }
 
+/** Ein Mitbewerber aus dem lokalen Google-Maps-Umfeld. */
+export interface Competitor {
+  name: string;
+  rating: number | null;
+  reviews: number;
+  hasWebsite: boolean;
+  /** Ist das der Lead selbst (Namensmatch)? */
+  isSelf: boolean;
+}
+
+/** Konkurrenz-Vergleich: wo steht der Lead im lokalen Wettbewerb. */
+export interface CompetitorCheck {
+  keyword: string;
+  /** Gefundene Anbieter im Umkreis. */
+  total: number;
+  /** Durchschnittsbewertung des Felds. */
+  avgRating: number | null;
+  /** Wie viele der Anbieter eine Website haben. */
+  withWebsite: number;
+  /** Platz des Leads nach Bewertung (1 = bester), null wenn nicht gefunden. */
+  selfRank: number | null;
+  /** Anbieter, nach Bewertung sortiert (inkl. Lead selbst, markiert). */
+  competitors: Competitor[];
+}
+
 /**
  * In der DB gecachte DataForSEO-Anreicherung eines Leads. Wird pro Lead nur
  * einmal bezahlt – erneutes Öffnen liest aus dem Cache.
@@ -152,6 +177,8 @@ export interface LeadEnrichment {
   marketAt?: string;
   reviews?: ReviewItem[];
   reviewsAt?: string;
+  competitors?: CompetitorCheck;
+  competitorsAt?: string;
 }
 
 export interface List {

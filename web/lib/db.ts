@@ -2,6 +2,7 @@ import postgres from "postgres";
 import type {
   BusinessProfile,
   CommissionSummary,
+  CompetitorCheck,
   DbLead,
   LeaderboardRow,
   Lead,
@@ -660,6 +661,11 @@ export async function dbSaveLeadMarket(uid: string, market: MarketCheck): Promis
 export async function dbSaveLeadReviews(uid: string, reviews: ReviewItem[]): Promise<void> {
   await ensureSchema();
   await mergeEnrichment(uid, { reviews, reviewsAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadCompetitors(uid: string, competitors: CompetitorCheck): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { competitors, competitorsAt: new Date().toISOString() });
 }
 
 // =============================================================================

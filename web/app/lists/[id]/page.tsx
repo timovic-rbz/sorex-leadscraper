@@ -8,6 +8,7 @@ import {
   LEAD_STATUS_META,
   LEAD_STATUS_ORDER,
   type BusinessProfile,
+  type CompetitorCheck,
   type DbLead,
   type LeadEnrichment,
   type LeadStatus,
@@ -863,6 +864,9 @@ function LeadModal({
         {/* DataForSEO Ranking & Markt (on-demand, gecacht) */}
         <MarketCheckSection lead={lead} initial={enrichment?.market ?? null} />
 
+        {/* DataForSEO Konkurrenz-Vergleich (on-demand, gecacht) */}
+        <CompetitorsSection lead={lead} initial={enrichment?.competitors ?? null} />
+
         {/* DataForSEO negative Reviews (on-demand, gecacht) */}
         <ReviewsSection lead={lead} initial={enrichment?.reviews ?? null} />
 
@@ -1570,6 +1574,136 @@ function MarketBody({ market, hasWebsite }: { market: MarketCheck; hasWebsite: b
           </ol>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Konkurrenz-Vergleich (DataForSEO Maps) – on-demand im Modal
+// ============================================================================
+
+function CompetitorsSection({ lead, initial }: { lead: DbLead; initial: CompetitorCheck | null }) {
+  const [data, setData] = useState<CompetitorCheck | null>(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initial) setData(initial);
+  }, [initial]);
+
+  async function run(force = false) {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/competitors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: lead.uid,
+          service: lead.dienstleistung,
+          city: lead.ort,
+          selfName: lead.firmenname,
+          force,
+        }),
+      });
+      const d = (await r.json()) as { competitors?: CompetitorCheck | null; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setData(d.competitors ?? null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-6 py-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+          🏆 Konkurrenz im Umkreis
+        </span>
+        {!data ? (
+          <button
+            onClick={() => run(false)}
+            disabled={loading}
+            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "⏳ Lädt…" : "Konkurrenz prüfen"}
+          </button>
+        ) : (
+          <button
+            onClick={() => run(true)}
+            disabled={loading}
+            className="text-[11px] font-medium text-stone-400 transition hover:text-stone-600 disabled:opacity-50"
+          >
+            {loading ? "⏳…" : "↻ Aktualisieren"}
+          </button>
+        )}
+      </div>
+
+      {!data && !loading && !error && (
+        <p className="text-[11px] text-stone-400">
+          Vergleicht den Lead mit Mitbewerbern in der Umgebung (Bewertung, Reviews, Website). Eine
+          Maps-Suche, ~0,2 ct, danach gecacht.
+        </p>
+      )}
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+      {data && <CompetitorsBody data={data} />}
+    </div>
+  );
+}
+
+function CompetitorsBody({ data }: { data: CompetitorCheck }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        {data.selfRank != null && (
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+              data.selfRank <= 3
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-amber-100 text-amber-800"
+            }`}
+          >
+            🏅 Platz {data.selfRank} von {data.total}
+          </span>
+        )}
+        {data.avgRating != null && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+            Ø {data.avgRating.toFixed(1)}★ im Feld
+          </span>
+        )}
+        <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+          🌐 {data.withWebsite}/{data.total} mit Website
+        </span>
+      </div>
+
+      <ul className="space-y-1">
+        {data.competitors.map((c, i) => (
+          <li
+            key={`${c.name}-${i}`}
+            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] ${
+              c.isSelf ? "bg-rose-50 font-semibold text-rose-800 ring-1 ring-rose-100" : "text-stone-600"
+            }`}
+          >
+            <span className="w-4 shrink-0 text-right tabular-nums text-stone-400">{i + 1}</span>
+            <span className="flex-1 truncate">
+              {c.name} {c.isSelf && "← dieser Lead"}
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {c.rating != null ? `${c.rating}★` : "–"}
+              <span className="text-stone-400"> · {c.reviews}</span>
+            </span>
+            <span className="w-4 shrink-0 text-center" title={c.hasWebsite ? "hat Website" : "keine Website"}>
+              {c.hasWebsite ? "🌐" : "—"}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
