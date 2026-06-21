@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { use } from "react";
 import {
   LEAD_STATUS_META,
@@ -69,13 +69,17 @@ interface ListResponse {
 
 export default function ListDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const deepLinkUid = searchParams.get("lead");
+  const callMode = searchParams.get("call") === "1";
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openLead, setOpenLead] = useState<DbLead | null>(null);
   const [hidden, setHidden] = useState<Set<LeadStatus>>(() => new Set());
   const [websiteFilter, setWebsiteFilter] = useState<WebsiteFilter>("all");
+  const [callIdx, setCallIdx] = useState(0);
+  const [callWorked, setCallWorked] = useState(0);
 
   useEffect(() => {
     setHidden(loadHidden());
@@ -154,6 +158,19 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     [grouped, hidden],
   );
 
+  // Anruf-Modus: abzutelefonierende Leads (neu + nicht erreicht), in Listen-Reihenfolge.
+  // Snapshot über data – wird im Call-Flow nicht neu geladen, damit die Queue stabil bleibt.
+  const callQueue = useMemo(
+    () =>
+      data
+        ? data.leads.filter((l) => {
+            const s = l.leadStatus ?? "new";
+            return s === "new" || s === "no_answer";
+          })
+        : [],
+    [data],
+  );
+
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
 
   async function enrichVisible() {
@@ -196,6 +213,54 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     );
 
   if (!data) return <div className="p-6"><p className="text-stone-500">Lade...</p></div>;
+
+  // ===== Anruf-Modus: fokussiert ein Lead nach dem anderen, kein Dashboard =====
+  if (callMode) {
+    if (callQueue.length === 0 || callIdx >= callQueue.length) {
+      return (
+        <div
+          className="mx-auto flex max-w-md flex-col items-center justify-center gap-4 p-10 text-center"
+          style={{ minHeight: "70vh" }}
+        >
+          <div className="text-5xl">{callWorked > 0 ? "🎉" : "📭"}</div>
+          <h1 className="text-2xl font-bold">
+            {callWorked > 0 ? `${callWorked} Leads abgearbeitet!` : "Keine offenen Leads"}
+          </h1>
+          <p className="text-sm text-stone-500">
+            {callWorked > 0
+              ? `Liste „${data.list.name}" für jetzt durch.`
+              : `In „${data.list.name}" gibt es gerade nichts abzutelefonieren.`}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={() => router.push("/call")} className="btn-primary">
+              ← Andere Liste
+            </button>
+            <Link href={`/lists/${id}`} className="btn-ghost">
+              Zur Liste
+            </Link>
+          </div>
+        </div>
+      );
+    }
+    const lead = callQueue[callIdx];
+    const next = callQueue[callIdx + 1] ?? null;
+    return (
+      <LeadModal
+        key={lead.uid}
+        lead={lead}
+        queuePosition={callIdx + 1}
+        queueTotal={callQueue.length}
+        nextName={next?.firmenname ?? null}
+        onClose={() => router.push("/call")}
+        onSaved={(advance) => {
+          if (advance) {
+            setCallWorked((w) => w + 1);
+            setCallIdx((i) => i + 1);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-[1900px] p-4 lg:p-6">
