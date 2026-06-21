@@ -138,6 +138,13 @@ async function runSchema(): Promise<void> {
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS qualified_info JSONB`,
     sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS enrichment JSONB`,
     sql`ALTER TABLE setters ADD COLUMN IF NOT EXISTS commission_eur NUMERIC NOT NULL DEFAULT 0`,
+    // Zweistufiges Provisionsmodell (USD): Setting-Fee/Monat + Closing-Fee einmalig.
+    sql`ALTER TABLE setters ADD COLUMN IF NOT EXISTS setting_fee NUMERIC NOT NULL DEFAULT 20`,
+    sql`ALTER TABLE setters ADD COLUMN IF NOT EXISTS closing_fee NUMERIC NOT NULL DEFAULT 80`,
+    // Wer hat gesettet (Termin) / geclosed (won) + Kunden-Kündigung für recurring.
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS set_by_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS closed_by_setter_id INTEGER REFERENCES setters(id) ON DELETE SET NULL`,
+    sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS customer_churned_at TIMESTAMPTZ`,
     sql`
       CREATE TABLE IF NOT EXISTS lead_events (
         id SERIAL PRIMARY KEY,
@@ -162,6 +169,18 @@ async function runSchema(): Promise<void> {
       WHERE list_id IS NULL
     `,
   ]);
+
+  // Welle 4 – Provisions-Backfill: bestehende "Kunde"-Leads bekommen Setter/Closer
+  // aus last_setter_id, damit sie sofort in der Provisionsberechnung zählen.
+  // Idempotent (nur NULL-Felder werden gefüllt) → läuft bei jedem Boot harmlos.
+  await sql`
+    UPDATE leads
+    SET set_by_setter_id    = COALESCE(set_by_setter_id, last_setter_id),
+        closed_by_setter_id = COALESCE(closed_by_setter_id, last_setter_id)
+    WHERE lead_status = 'won'
+      AND last_setter_id IS NOT NULL
+      AND (set_by_setter_id IS NULL OR closed_by_setter_id IS NULL)
+  `;
 }
 
 function ensureSchema(): Promise<void> {
@@ -435,6 +454,7 @@ interface DbLeadRow {
   last_setter_name: string | null;
   last_setter_color: string | null;
   qualified_info: QualifiedInfo | null;
+  customer_churned_at: string | null;
 }
 
 function rowToDbLead(r: DbLeadRow): DbLead {
@@ -466,6 +486,7 @@ function rowToDbLead(r: DbLeadRow): DbLead {
     lastSetterName: r.last_setter_name ?? null,
     lastSetterColor: r.last_setter_color ?? null,
     qualifiedInfo: r.qualified_info ?? null,
+    customerChurnedAt: r.customer_churned_at ?? null,
   };
 }
 
@@ -542,6 +563,8 @@ export interface LeadPatch {
   setLastContact?: boolean;
   listId?: number;
   qualifiedInfo?: QualifiedInfo;
+  /** Kunden-Kündigung umschalten (stoppt/startet die wiederkehrende Setting-Fee). */
+  customerChurned?: boolean;
 }
 
 export async function dbUpdateLead(
@@ -586,6 +609,25 @@ export async function dbUpdateLead(
   // Setter merken, sobald er irgendwas am Lead bewegt
   if (setterId !== null && (patch.leadStatus !== undefined || patch.bumpCallCount || patch.setLastContact)) {
     fragments.push(sql`last_setter_id = ${setterId}`);
+  }
+
+  // Provision-Tracking: wer hat gesettet (Termin gebucht) / geclosed (won).
+  // set_by = erster Setter, der den Sales-Call vereinbart hat (COALESCE = nicht überschreiben).
+  if (setterId !== null && patch.leadStatus === "call_scheduled") {
+    fragments.push(sql`set_by_setter_id = COALESCE(set_by_setter_id, ${setterId})`);
+  }
+  // closed_by = Setter, der auf "Kunde" setzt; set_by als Fallback ebenfalls füllen
+  // (falls direkt geclosed wurde, ohne vorher Call zu vereinbaren).
+  if (setterId !== null && patch.leadStatus === "won") {
+    fragments.push(sql`closed_by_setter_id = ${setterId}`);
+    fragments.push(sql`set_by_setter_id = COALESCE(set_by_setter_id, ${setterId})`);
+  }
+
+  // Kunden-Kündigung umschalten (für die wiederkehrende Setting-Fee).
+  if (patch.customerChurned !== undefined) {
+    fragments.push(
+      patch.customerChurned ? sql`customer_churned_at = NOW()` : sql`customer_churned_at = NULL`,
+    );
   }
 
   if (fragments.length > 0) {
@@ -672,23 +714,36 @@ export async function dbSaveLeadRankedKeywords(uid: string, rankedKeywords: Rank
 // SETTERS – Team-Verwaltung
 // =============================================================================
 
-export async function dbListSetters(): Promise<Setter[]> {
-  await ensureSchema();
-  const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
-  >`
-    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at
-    FROM setters
-    ORDER BY is_admin DESC, name ASC
-  `;
-  return rows.map((r) => ({
+interface SetterRow {
+  id: number;
+  name: string;
+  color: string;
+  is_admin: boolean;
+  setting_fee: number;
+  closing_fee: number;
+  created_at: string;
+}
+
+const SETTER_COLS = sql`id, name, color, is_admin, setting_fee::float8 AS setting_fee, closing_fee::float8 AS closing_fee, created_at`;
+
+function mapSetter(r: SetterRow): Setter {
+  return {
     id: r.id,
     name: r.name,
     color: r.color,
     isAdmin: r.is_admin,
-    commissionEur: Number(r.commission_eur) || 0,
+    settingFee: Number(r.setting_fee) || 0,
+    closingFee: Number(r.closing_fee) || 0,
     createdAt: r.created_at,
-  }));
+  };
+}
+
+export async function dbListSetters(): Promise<Setter[]> {
+  await ensureSchema();
+  const rows = await sql<SetterRow[]>`
+    SELECT ${SETTER_COLS} FROM setters ORDER BY is_admin DESC, name ASC
+  `;
+  return rows.map(mapSetter);
 }
 
 export async function dbCreateSetter(input: {
@@ -696,36 +751,35 @@ export async function dbCreateSetter(input: {
   pin: string;
   color?: string;
   isAdmin?: boolean;
-  commissionEur?: number;
+  settingFee?: number;
+  closingFee?: number;
 }): Promise<Setter> {
   await ensureSchema();
   const name = input.name.trim();
   const pin = input.pin.trim();
   if (!name) throw new Error("Name darf nicht leer sein");
   if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN muss 4–8 Ziffern haben");
-  const commission = Math.max(0, Number(input.commissionEur ?? 0)) || 0;
+  const settingFee = Math.max(0, Number(input.settingFee ?? 20)) || 0;
+  const closingFee = Math.max(0, Number(input.closingFee ?? 80)) || 0;
 
-  const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
-  >`
-    INSERT INTO setters (name, pin, color, is_admin, commission_eur)
-    VALUES (${name}, ${pin}, ${input.color ?? "#e11d48"}, ${input.isAdmin ?? false}, ${commission})
-    RETURNING id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at
+  const rows = await sql<SetterRow[]>`
+    INSERT INTO setters (name, pin, color, is_admin, setting_fee, closing_fee)
+    VALUES (${name}, ${pin}, ${input.color ?? "#e11d48"}, ${input.isAdmin ?? false}, ${settingFee}, ${closingFee})
+    RETURNING ${SETTER_COLS}
   `;
-  const r = rows[0];
-  return {
-    id: r.id,
-    name: r.name,
-    color: r.color,
-    isAdmin: r.is_admin,
-    commissionEur: Number(r.commission_eur) || 0,
-    createdAt: r.created_at,
-  };
+  return mapSetter(rows[0]);
 }
 
 export async function dbUpdateSetter(
   id: number,
-  patch: { name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number },
+  patch: {
+    name?: string;
+    pin?: string;
+    color?: string;
+    isAdmin?: boolean;
+    settingFee?: number;
+    closingFee?: number;
+  },
 ): Promise<void> {
   await ensureSchema();
   const fragments: ReturnType<typeof sql>[] = [];
@@ -736,9 +790,11 @@ export async function dbUpdateSetter(
   }
   if (patch.color !== undefined) fragments.push(sql`color = ${patch.color}`);
   if (patch.isAdmin !== undefined) fragments.push(sql`is_admin = ${patch.isAdmin}`);
-  if (patch.commissionEur !== undefined) {
-    const commission = Math.max(0, Number(patch.commissionEur)) || 0;
-    fragments.push(sql`commission_eur = ${commission}`);
+  if (patch.settingFee !== undefined) {
+    fragments.push(sql`setting_fee = ${Math.max(0, Number(patch.settingFee)) || 0}`);
+  }
+  if (patch.closingFee !== undefined) {
+    fragments.push(sql`closing_fee = ${Math.max(0, Number(patch.closingFee)) || 0}`);
   }
   if (fragments.length === 0) return;
   const setClause = fragments.reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc}, ${frag}`));
@@ -750,46 +806,20 @@ export async function dbDeleteSetter(id: number): Promise<void> {
   await sql`DELETE FROM setters WHERE id = ${id}`;
 }
 
-export async function dbVerifySetterPin(
-  setterId: number,
-  pin: string,
-): Promise<Setter | null> {
+export async function dbVerifySetterPin(setterId: number, pin: string): Promise<Setter | null> {
   await ensureSchema();
-  const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; pin: string; created_at: string }[]
-  >`
-    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, pin, created_at FROM setters WHERE id = ${setterId}
+  const rows = await sql<(SetterRow & { pin: string })[]>`
+    SELECT ${SETTER_COLS}, pin FROM setters WHERE id = ${setterId}
   `;
   const row = rows[0];
-  if (!row) return null;
-  if (row.pin !== pin) return null;
-  return {
-    id: row.id,
-    name: row.name,
-    color: row.color,
-    isAdmin: row.is_admin,
-    commissionEur: Number(row.commission_eur) || 0,
-    createdAt: row.created_at,
-  };
+  if (!row || row.pin !== pin) return null;
+  return mapSetter(row);
 }
 
 export async function dbGetSetter(id: number): Promise<Setter | null> {
   await ensureSchema();
-  const rows = await sql<
-    { id: number; name: string; color: string; is_admin: boolean; commission_eur: number; created_at: string }[]
-  >`
-    SELECT id, name, color, is_admin, commission_eur::float8 AS commission_eur, created_at FROM setters WHERE id = ${id}
-  `;
-  const r = rows[0];
-  if (!r) return null;
-  return {
-    id: r.id,
-    name: r.name,
-    color: r.color,
-    isAdmin: r.is_admin,
-    commissionEur: Number(r.commission_eur) || 0,
-    createdAt: r.created_at,
-  };
+  const rows = await sql<SetterRow[]>`SELECT ${SETTER_COLS} FROM setters WHERE id = ${id}`;
+  return rows[0] ? mapSetter(rows[0]) : null;
 }
 
 export async function dbCountSetters(): Promise<number> {
@@ -855,17 +885,19 @@ export async function dbLeaderboard(sinceIso: string | null): Promise<Leaderboar
 }
 
 // =============================================================================
-// PROVISIONEN – was jeder Setter pro Abschluss bekommt, abgeleitet aus won-Events
+// PROVISIONEN – zweistufig: Setting-Fee (wiederkehrend) + Closing-Fee (einmalig)
 // =============================================================================
 
 /**
- * Provisions-Übersicht aller Setter. Zählt abgeschlossene Deals ("won"-Events)
- * pro Setter – einmal für den laufenden Kalendermonat, einmal all-time – und
- * multipliziert mit dem individuellen Provisionssatz.
+ * Provisions-Übersicht aller Setter (USD). Zwei Komponenten:
+ *  - Setting-Fee: settingFee × aktive Kunden, die der Setter gesettet hat
+ *    (lead_status='won' UND customer_churned_at IS NULL, set_by_setter_id = Setter)
+ *    → wiederkehrend, gilt jeden Monat erneut, solange der Kunde aktiv ist.
+ *  - Closing-Fee: closingFee × Closings (won-Events mit setter_id = Setter)
+ *    → einmalig; closedMonth = laufender Monat, closedTotal = all-time.
  *
- * `COUNT(DISTINCT lead_uid)` statt `COUNT(*)`, damit ein Lead, der mehrmals auf
- * "won" gesetzt wurde (z.B. zurückgesetzt + erneut geschlossen), nicht doppelt
- * abgerechnet wird.
+ * COUNT(DISTINCT lead_uid) bei den won-Events, damit mehrfaches "won" nicht
+ * doppelt zählt.
  */
 export async function dbCommissions(): Promise<CommissionSummary[]> {
   await ensureSchema();
@@ -874,39 +906,66 @@ export async function dbCommissions(): Promise<CommissionSummary[]> {
       setter_id: number;
       name: string;
       color: string;
-      commission_eur: number;
-      won_month: number;
-      won_total: number;
+      setting_fee: number;
+      closing_fee: number;
+      active_customers: number;
+      closed_month: number;
+      closed_total: number;
     }[]
   >`
     SELECT
       s.id    AS setter_id,
       s.name,
       s.color,
-      s.commission_eur::float8 AS commission_eur,
-      COUNT(DISTINCT e.lead_uid) FILTER (
-        WHERE e.to_status = 'won' AND e.ts >= date_trunc('month', now())
-      )::int AS won_month,
-      COUNT(DISTINCT e.lead_uid) FILTER (WHERE e.to_status = 'won')::int AS won_total
+      s.setting_fee::float8 AS setting_fee,
+      s.closing_fee::float8 AS closing_fee,
+      COALESCE(ac.active_customers, 0)::int AS active_customers,
+      COALESCE(cm.closed_month, 0)::int     AS closed_month,
+      COALESCE(ct.closed_total, 0)::int     AS closed_total
     FROM setters s
-    LEFT JOIN lead_events e ON e.setter_id = s.id
-    GROUP BY s.id, s.name, s.color, s.commission_eur
-    ORDER BY won_month DESC, s.name ASC
+    LEFT JOIN (
+      SELECT set_by_setter_id AS sid, COUNT(*) AS active_customers
+      FROM leads
+      WHERE lead_status = 'won' AND customer_churned_at IS NULL AND set_by_setter_id IS NOT NULL
+      GROUP BY set_by_setter_id
+    ) ac ON ac.sid = s.id
+    LEFT JOIN (
+      SELECT setter_id AS sid, COUNT(DISTINCT lead_uid) AS closed_month
+      FROM lead_events
+      WHERE to_status = 'won' AND ts >= date_trunc('month', now()) AND setter_id IS NOT NULL
+      GROUP BY setter_id
+    ) cm ON cm.sid = s.id
+    LEFT JOIN (
+      SELECT setter_id AS sid, COUNT(DISTINCT lead_uid) AS closed_total
+      FROM lead_events
+      WHERE to_status = 'won' AND setter_id IS NOT NULL
+      GROUP BY setter_id
+    ) ct ON ct.sid = s.id
+    GROUP BY s.id, s.name, s.color, s.setting_fee, s.closing_fee,
+             ac.active_customers, cm.closed_month, ct.closed_total
+    ORDER BY s.name ASC
   `;
 
   return rows.map((r) => {
-    const rateEur = Number(r.commission_eur) || 0;
-    const wonMonth = Number(r.won_month);
-    const wonTotal = Number(r.won_total);
+    const settingFee = Number(r.setting_fee) || 0;
+    const closingFee = Number(r.closing_fee) || 0;
+    const activeCustomers = Number(r.active_customers);
+    const closedMonth = Number(r.closed_month);
+    const closedTotal = Number(r.closed_total);
+    const recurringMonth = settingFee * activeCustomers;
+    const closingMonth = closingFee * closedMonth;
     return {
       setterId: r.setter_id,
       name: r.name,
       color: r.color,
-      rateEur,
-      wonMonth,
-      wonTotal,
-      monthEur: rateEur * wonMonth,
-      totalEur: rateEur * wonTotal,
+      settingFee,
+      closingFee,
+      activeCustomers,
+      recurringMonth,
+      closedMonth,
+      closedTotal,
+      closingMonth,
+      monthTotal: recurringMonth + closingMonth,
     };
   });
 }

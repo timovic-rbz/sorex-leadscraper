@@ -83,11 +83,13 @@ export default function SettingsPage() {
       </section>
 
       <section className="mt-12 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">💶 Provisionen</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">💵 Provisionen (USD)</h2>
         <p className="text-sm text-stone-500">
-          Was jeder Setter diesen Monat aus seinen Abschlüssen verdient hat. Ergibt sich
-          automatisch aus jedem Lead, der auf <span className="font-medium">„Kunde"</span> gesetzt
-          wurde × dem Provisionssatz des Setters (unten im Team einstellbar).
+          Zweistufig: <span className="font-medium">🔁 Setting-Fee</span> läuft wiederkehrend jeden
+          Monat pro aktivem Kunden, den der Setter gesettet hat (bis der Kunde als gekündigt markiert
+          wird). <span className="font-medium">🏆 Closing-Fee</span> gibt es einmalig pro Abschluss
+          für den Setter, der auf <span className="font-medium">„Kunde"</span> gesetzt hat. Sätze
+          unten im Team einstellbar.
         </p>
         <CommissionSection />
       </section>
@@ -130,10 +132,11 @@ function CommissionSection() {
   if (team === null) return <p className="text-sm text-stone-500">Lade...</p>;
 
   const monthLabel = new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" });
-  const monthTotal = team.reduce((acc, c) => acc + c.monthEur, 0);
-  const monthDeals = team.reduce((acc, c) => acc + c.wonMonth, 0);
-  // Setter ohne Abschlüsse diesen Monat ans Ende, aber weiterhin auflisten
-  const sorted = [...team].sort((a, b) => b.monthEur - a.monthEur || b.wonMonth - a.wonMonth);
+  const monthTotal = team.reduce((acc, c) => acc + c.monthTotal, 0);
+  const recurringTotal = team.reduce((acc, c) => acc + c.recurringMonth, 0);
+  const closingTotal = team.reduce((acc, c) => acc + c.closingMonth, 0);
+  const activeTotal = team.reduce((acc, c) => acc + c.activeCustomers, 0);
+  const sorted = [...team].sort((a, b) => b.monthTotal - a.monthTotal);
 
   return (
     <div className="space-y-4">
@@ -143,12 +146,15 @@ function CommissionSection() {
             Auszuzahlen · {monthLabel}
           </div>
           <div className="mt-1 text-3xl font-bold tabular-nums text-stone-900">
-            {formatEur(monthTotal)}
+            {formatUsd(monthTotal)}
           </div>
-          <div className="mt-1 text-xs text-stone-500">{monthDeals} Abschlüsse im Team</div>
+          <div className="mt-1 text-xs text-stone-500">
+            {formatUsd(recurringTotal)} wiederkehrend ({activeTotal} aktive Kunden) ·{" "}
+            {formatUsd(closingTotal)} Closings
+          </div>
         </div>
         <div className="text-right text-xs text-stone-500">
-          Provision = Abschlüsse × Satz<br />pro Setter
+          Setting-Fee × aktive Kunden<br />+ Closing-Fee × Abschlüsse
         </div>
       </div>
 
@@ -174,11 +180,13 @@ function CommissionSection() {
           <div className="min-w-0 flex-1">
             <div className="truncate font-semibold">{c.name}</div>
             <div className="text-xs text-stone-500">
-              {formatEur(c.rateEur)}/Abschluss · {c.wonMonth}× diesen Monat · {c.wonTotal}× gesamt
+              🔁 {c.activeCustomers} aktive × {formatUsd(c.settingFee)} = {formatUsd(c.recurringMonth)}
+              {" · "}
+              🏆 {c.closedMonth}× × {formatUsd(c.closingFee)} = {formatUsd(c.closingMonth)}
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <div className="text-lg font-bold tabular-nums text-emerald-700">{formatEur(c.monthEur)}</div>
+            <div className="text-lg font-bold tabular-nums text-emerald-700">{formatUsd(c.monthTotal)}</div>
             <div className="text-[10px] uppercase tracking-wider text-stone-400">diesen Monat</div>
           </div>
         </div>
@@ -359,6 +367,16 @@ function formatEur(eur: number): string {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Provisions-Beträge in USD (ohne Nachkommastellen bei runden Summen). */
+function formatUsd(usd: number): string {
+  return usd.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: Number.isInteger(usd) ? 0 : 2,
     maximumFractionDigits: 2,
   });
 }
@@ -610,7 +628,8 @@ function SetterRow({
   const [pin, setPin] = useState("");
   const [color, setColor] = useState(setter.color);
   const [isAdmin, setIsAdmin] = useState(setter.isAdmin);
-  const [commission, setCommission] = useState(String(setter.commissionEur ?? 0));
+  const [settingFee, setSettingFee] = useState(String(setter.settingFee ?? 20));
+  const [closingFee, setClosingFee] = useState(String(setter.closingFee ?? 80));
   const [busy, setBusy] = useState(false);
 
   async function save() {
@@ -621,7 +640,8 @@ function SetterRow({
         name,
         color,
         isAdmin,
-        commissionEur: Number(commission.replace(",", ".")) || 0,
+        settingFee: Number(settingFee.replace(",", ".")) || 0,
+        closingFee: Number(closingFee.replace(",", ".")) || 0,
       };
       if (pin) body.pin = pin;
       const r = await fetch("/api/setters", {
@@ -666,9 +686,15 @@ function SetterRow({
             )}
             <span
               className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"
-              title="Provision pro Abschluss"
+              title="Setting-Fee pro Monat / aktivem Kunden"
             >
-              💶 {formatEur(setter.commissionEur)}/Abschluss
+              🔁 {formatUsd(setter.settingFee)}/Mo
+            </span>
+            <span
+              className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+              title="Closing-Fee einmalig pro Abschluss"
+            >
+              🏆 {formatUsd(setter.closingFee)}
             </span>
           </div>
           <div className="text-xs text-stone-500">
@@ -718,19 +744,34 @@ function SetterRow({
           ))}
         </div>
       </div>
-      <label className="block max-w-[240px]">
-        <span className="label-base">Provision pro Abschluss (€)</span>
-        <input
-          className="input-base"
-          type="number"
-          min={0}
-          step="0.01"
-          inputMode="decimal"
-          value={commission}
-          onChange={(e) => setCommission(e.target.value)}
-          placeholder="z.B. 50"
-        />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label-base">🔁 Setting-Fee ($/Monat, pro aktivem Kunden)</span>
+          <input
+            className="input-base"
+            type="number"
+            min={0}
+            step="1"
+            inputMode="decimal"
+            value={settingFee}
+            onChange={(e) => setSettingFee(e.target.value)}
+            placeholder="z.B. 20"
+          />
+        </label>
+        <label className="block">
+          <span className="label-base">🏆 Closing-Fee ($ einmalig pro Abschluss)</span>
+          <input
+            className="input-base"
+            type="number"
+            min={0}
+            step="1"
+            inputMode="decimal"
+            value={closingFee}
+            onChange={(e) => setClosingFee(e.target.value)}
+            placeholder="z.B. 80"
+          />
+        </label>
+      </div>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
         Admin-Rechte (Suche + Einstellungen)
@@ -752,7 +793,8 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
   const [pin, setPin] = useState("");
   const [color, setColor] = useState(COLOR_PALETTE[0]);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [commission, setCommission] = useState("");
+  const [settingFee, setSettingFee] = useState("20");
+  const [closingFee, setClosingFee] = useState("80");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -768,7 +810,8 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
           pin,
           color,
           isAdmin,
-          commissionEur: Number(commission.replace(",", ".")) || 0,
+          settingFee: Number(settingFee.replace(",", ".")) || 0,
+          closingFee: Number(closingFee.replace(",", ".")) || 0,
         }),
       });
       const d = (await r.json()) as { error?: string };
@@ -813,19 +856,34 @@ function NewSetterForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
           ))}
         </div>
       </div>
-      <label className="block max-w-[240px]">
-        <span className="label-base">Provision pro Abschluss (€)</span>
-        <input
-          className="input-base"
-          type="number"
-          min={0}
-          step="0.01"
-          inputMode="decimal"
-          value={commission}
-          onChange={(e) => setCommission(e.target.value)}
-          placeholder="z.B. 50"
-        />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label-base">🔁 Setting-Fee ($/Monat, pro aktivem Kunden)</span>
+          <input
+            className="input-base"
+            type="number"
+            min={0}
+            step="1"
+            inputMode="decimal"
+            value={settingFee}
+            onChange={(e) => setSettingFee(e.target.value)}
+            placeholder="z.B. 20"
+          />
+        </label>
+        <label className="block">
+          <span className="label-base">🏆 Closing-Fee ($ einmalig pro Abschluss)</span>
+          <input
+            className="input-base"
+            type="number"
+            min={0}
+            step="1"
+            inputMode="decimal"
+            value={closingFee}
+            onChange={(e) => setClosingFee(e.target.value)}
+            placeholder="z.B. 80"
+          />
+        </label>
+      </div>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
         Admin-Rechte

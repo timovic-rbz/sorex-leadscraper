@@ -795,6 +795,13 @@ function LeadModal({
     if (ok) onSaved(false); // nur Notiz gespeichert → Fenster schließen, nicht springen
   }
 
+  // Kunden-Kündigung umschalten (stoppt/startet die wiederkehrende Setting-Fee).
+  const [churned, setChurned] = useState(Boolean(lead.customerChurnedAt));
+  async function toggleChurn() {
+    const ok = await patch({ customerChurned: !churned });
+    if (ok) setChurned(!churned);
+  }
+
   async function scheduleCall() {
     if (!nextActionAt) {
       setErrorMsg("Bitte Termin-Datum wählen");
@@ -919,6 +926,35 @@ function LeadModal({
           <InfoPanel label="Letzter Kontakt" value={lead.lastContact ? new Date(lead.lastContact).toLocaleDateString("de-DE") : "—"} />
           <InfoPanel label="Wiedervorlage" value={lead.nextActionAt ? new Date(lead.nextActionAt).toLocaleDateString("de-DE") : "—"} />
         </div>
+
+        {/* Kunden-Status (nur bei "Kunde"): steuert die wiederkehrende Setting-Fee */}
+        {(lead.leadStatus ?? "new") === "won" && (
+          <div className="px-6 pb-1 pt-1">
+            {churned ? (
+              <div className="flex items-center justify-between gap-2 rounded-xl bg-stone-100 px-3 py-2.5 text-sm">
+                <span className="text-stone-500">🚫 Kunde gekündigt — keine wiederkehrende Provision mehr.</span>
+                <button
+                  onClick={toggleChurn}
+                  disabled={busy}
+                  className="shrink-0 text-xs font-medium text-emerald-700 hover:underline disabled:opacity-50"
+                >
+                  Reaktivieren
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm ring-1 ring-emerald-100">
+                <span className="font-medium text-emerald-800">✅ Aktiver Kunde — Setting-Fee läuft monatlich.</span>
+                <button
+                  onClick={toggleChurn}
+                  disabled={busy}
+                  className="shrink-0 text-xs font-medium text-stone-500 transition hover:text-rose-700 disabled:opacity-50"
+                >
+                  Als gekündigt markieren
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* DataForSEO-Insights – einklappbares Akkordeon (einzeln + alle) */}
         <InsightsPanel lead={lead} enrichment={enrichment} />

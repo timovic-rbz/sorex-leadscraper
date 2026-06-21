@@ -6,11 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import type { CommissionSummary, SessionInfo } from "@/lib/types";
 import { openPhoneSearch } from "./PhoneSearchTrigger";
 
-/** Euro-Betrag kompakt formatieren (ohne Nachkommastellen bei runden Summen). */
-function eur(n: number): string {
+/** Provisions-Betrag (USD) kompakt formatieren (ohne Nachkommastellen bei runden Summen). */
+function usd(n: number): string {
   return n.toLocaleString("de-DE", {
     style: "currency",
-    currency: "EUR",
+    currency: "USD",
     minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
     maximumFractionDigits: 2,
   });
@@ -147,21 +147,21 @@ function DesktopSidebar({
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
-        {commission && commission.rateEur > 0 && (
+        {commission && commission.monthTotal > 0 && (
           <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-emerald-50 px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-                💶 Provision · Monat
+                💵 Provision · Monat
               </span>
               <span className="text-[10px] text-stone-400 tabular-nums">
-                {commission.wonMonth} Abschl.
+                {commission.activeCustomers} aktiv
               </span>
             </div>
             <div className="mt-0.5 text-xl font-bold tabular-nums text-emerald-700">
-              {eur(commission.monthEur)}
+              {usd(commission.monthTotal)}
             </div>
             <div className="text-[10px] text-stone-400">
-              {eur(commission.rateEur)} pro Abschluss
+              🔁 {usd(commission.recurringMonth)} · 🏆 {usd(commission.closingMonth)}
             </div>
           </div>
         )}
@@ -271,12 +271,12 @@ function MobileTopBar({
         <span className="text-sm font-semibold tracking-tight">Soreax</span>
       </div>
       <div className="flex items-center gap-2">
-        {commission && commission.rateEur > 0 && (
+        {commission && commission.monthTotal > 0 && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 tabular-nums"
-            title={`Provision diesen Monat · ${commission.wonMonth} Abschlüsse`}
+            title={`Provision diesen Monat · ${commission.activeCustomers} aktive Kunden`}
           >
-            💶 {eur(commission.monthEur)}
+            💵 {usd(commission.monthTotal)}
           </span>
         )}
         <button

@@ -28,7 +28,14 @@ export async function POST(req: Request) {
   const guard = await requireAdmin();
   if (guard) return guard;
 
-  let body: { name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number };
+  let body: {
+    name?: string;
+    pin?: string;
+    color?: string;
+    isAdmin?: boolean;
+    settingFee?: number;
+    closingFee?: number;
+  };
   try {
     body = await req.json();
   } catch {
@@ -37,16 +44,16 @@ export async function POST(req: Request) {
   if (!body.name || !body.pin) {
     return NextResponse.json({ error: "name und pin sind Pflicht" }, { status: 400 });
   }
-  if (body.commissionEur !== undefined && (!Number.isFinite(body.commissionEur) || body.commissionEur < 0)) {
-    return NextResponse.json({ error: "commissionEur muss eine Zahl ≥ 0 sein" }, { status: 400 });
-  }
+  const feeError = validateFees(body);
+  if (feeError) return NextResponse.json({ error: feeError }, { status: 400 });
   try {
     const setter = await dbCreateSetter({
       name: body.name,
       pin: body.pin,
       color: body.color,
       isAdmin: body.isAdmin ?? false,
-      commissionEur: body.commissionEur,
+      settingFee: body.settingFee,
+      closingFee: body.closingFee,
     });
     return NextResponse.json({ setter });
   } catch (e) {
@@ -54,27 +61,48 @@ export async function POST(req: Request) {
   }
 }
 
+/** Validiert Setting-/Closing-Fee (Zahl ≥ 0), falls gesetzt. */
+function validateFees(b: { settingFee?: number; closingFee?: number }): string | null {
+  for (const [key, val] of [
+    ["settingFee", b.settingFee],
+    ["closingFee", b.closingFee],
+  ] as const) {
+    if (val !== undefined && (!Number.isFinite(val) || val < 0)) {
+      return `${key} muss eine Zahl ≥ 0 sein`;
+    }
+  }
+  return null;
+}
+
 export async function PATCH(req: Request) {
   const guard = await requireAdmin();
   if (guard) return guard;
 
-  let body: { id?: number; name?: string; pin?: string; color?: string; isAdmin?: boolean; commissionEur?: number };
+  let body: {
+    id?: number;
+    name?: string;
+    pin?: string;
+    color?: string;
+    isAdmin?: boolean;
+    settingFee?: number;
+    closingFee?: number;
+  };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
   if (!body.id) return NextResponse.json({ error: "id fehlt" }, { status: 400 });
-  if (body.commissionEur !== undefined && (!Number.isFinite(body.commissionEur) || body.commissionEur < 0)) {
-    return NextResponse.json({ error: "commissionEur muss eine Zahl ≥ 0 sein" }, { status: 400 });
-  }
+  const feeError = validateFees(body);
+  if (feeError) return NextResponse.json({ error: feeError }, { status: 400 });
   try {
     await dbUpdateSetter(body.id, {
       name: body.name,
       pin: body.pin,
       color: body.color,
       isAdmin: body.isAdmin,
-      commissionEur: body.commissionEur,
+      settingFee: body.settingFee,
+      closingFee: body.closingFee,
     });
     return NextResponse.json({ ok: true });
   } catch (e) {

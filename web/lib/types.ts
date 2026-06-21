@@ -202,6 +202,8 @@ export interface DbLeadCrm {
   lastSetterName: string | null;
   lastSetterColor: string | null;
   qualifiedInfo: QualifiedInfo | null;
+  /** Bei "won": Zeitpunkt der Kündigung (null = aktiver Kunde). Steuert die wiederkehrende Setting-Fee. */
+  customerChurnedAt: string | null;
 }
 
 export interface Setter {
@@ -209,26 +211,38 @@ export interface Setter {
   name: string;
   color: string;
   isAdmin: boolean;
-  /** Provision, die der Setter pro Abschluss (Lead → "Kunde") bekommt, in Euro. */
-  commissionEur: number;
+  /** Setting-Fee: $/Monat, wiederkehrend pro aktivem Kunden, den der Setter gesettet hat. */
+  settingFee: number;
+  /** Closing-Fee: $ einmalig pro Kunde, den der Setter geclosed hat. */
+  closingFee: number;
   createdAt: string;
 }
 
-/** Provisions-Übersicht eines Setters (abgeleitet aus den won-Events). */
+/**
+ * Provisions-Übersicht eines Setters. Zweistufiges Modell:
+ *  - Setting-Fee: wiederkehrend pro Monat × aktive Kunden (gesettet, nicht gekündigt)
+ *  - Closing-Fee: einmalig pro geclostem Kunde
+ */
 export interface CommissionSummary {
   setterId: number;
   name: string;
   color: string;
-  /** Provision pro Abschluss (€). */
-  rateEur: number;
-  /** Abschlüsse im laufenden Kalendermonat. */
-  wonMonth: number;
-  /** Abschlüsse insgesamt (all-time). */
-  wonTotal: number;
-  /** rateEur × wonMonth. */
-  monthEur: number;
-  /** rateEur × wonTotal. */
-  totalEur: number;
+  /** $/Monat pro aktivem Kunden. */
+  settingFee: number;
+  /** $ einmalig pro Closing. */
+  closingFee: number;
+  /** Aktive Kunden, die dieser Setter gesettet hat (won, nicht gekündigt). */
+  activeCustomers: number;
+  /** Wiederkehrend diesen Monat: activeCustomers × settingFee. */
+  recurringMonth: number;
+  /** Closings im laufenden Kalendermonat. */
+  closedMonth: number;
+  /** Closings insgesamt. */
+  closedTotal: number;
+  /** Closing-Auszahlung diesen Monat: closedMonth × closingFee. */
+  closingMonth: number;
+  /** Gesamt-Auszahlung diesen Monat: recurringMonth + closingMonth. */
+  monthTotal: number;
 }
 
 export interface SessionInfo {
