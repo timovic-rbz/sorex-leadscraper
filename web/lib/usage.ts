@@ -21,6 +21,9 @@ const GOOGLE_TEXT_SEARCH_USD = 0.032;
 // DataForSEO "Google Maps SERP – Live Advanced" — ~$0.002 pro Request (bis 100 Treffer)
 const DATAFORSEO_MAPS_USD = 0.002;
 
+// DataForSEO "Business Data – My Business Info Live" — ~$0.002 pro Profil-Abruf
+const DATAFORSEO_BUSINESS_INFO_USD = 0.002;
+
 // Anthropic Claude (Sonnet 4.5) — Input/Output in USD pro 1M Tokens
 const ANTHROPIC_INPUT_USD_PER_MTOK = 3.0;
 const ANTHROPIC_OUTPUT_USD_PER_MTOK = 15.0;
@@ -44,6 +47,15 @@ export async function recordDataForSeoMapsSearch(itemsReturned: number): Promise
     "maps_search",
     itemsReturned,
     DATAFORSEO_MAPS_USD * USD_TO_EUR,
+  );
+}
+
+export async function recordDataForSeoMyBusinessInfo(): Promise<void> {
+  await dbRecordUsage(
+    "dataforseo",
+    "my_business_info",
+    1,
+    DATAFORSEO_BUSINESS_INFO_USD * USD_TO_EUR,
   );
 }
 

@@ -7,6 +7,7 @@ import { use } from "react";
 import {
   LEAD_STATUS_META,
   LEAD_STATUS_ORDER,
+  type BusinessProfile,
   type DbLead,
   type LeadStatus,
   type List,
@@ -782,6 +783,9 @@ function LeadModal({
           <InfoPanel label="Wiedervorlage" value={lead.nextActionAt ? new Date(lead.nextActionAt).toLocaleDateString("de-DE") : "—"} />
         </div>
 
+        {/* DataForSEO Business-Profil (on-demand) */}
+        <BusinessProfileSection lead={lead} />
+
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -907,6 +911,187 @@ function StatusButton({ color, onClick, children, disabled, shortcut }: { color:
       )}
       {children}
     </button>
+  );
+}
+
+// ============================================================================
+// Business-Profil (DataForSEO) – on-demand im Modal nachgeladen
+// ============================================================================
+
+/** Google-CID aus einem Maps-Link (…?cid=123…) ziehen, sonst undefined. */
+function extractCid(mapsUrl: string | undefined): string | undefined {
+  if (!mapsUrl) return undefined;
+  return mapsUrl.match(/[?&]cid=(\d+)/)?.[1];
+}
+
+function BusinessProfileSection({ lead }: { lead: DbLead }) {
+  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const cid = extractCid(lead.googleMaps);
+      const placeId = lead.uid.startsWith("google:")
+        ? lead.uid.slice("google:".length)
+        : undefined;
+      const r = await fetch("/api/business-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cid,
+          placeId,
+          name: lead.firmenname,
+          address: lead.adresse,
+          ort: lead.ort,
+        }),
+      });
+      const d = (await r.json()) as { profile?: BusinessProfile | null; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setProfile(d.profile ?? null);
+      setLoaded(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-6 py-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+          🔎 Business-Profil
+        </span>
+        {!loaded && (
+          <button
+            onClick={load}
+            disabled={loading}
+            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "⏳ Lädt…" : "Profil laden"}
+          </button>
+        )}
+      </div>
+
+      {!loaded && !loading && !error && (
+        <p className="text-[11px] text-stone-400">
+          Lädt zusätzliche Details über DataForSEO (Beschreibung, ob das Profil beansprucht ist,
+          Ausstattung, Foto-Anzahl, Review-Themen). Verbraucht ~0,2 ct.
+        </p>
+      )}
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+      {loaded && !profile && !error && (
+        <p className="text-sm text-stone-500">Kein Profil bei DataForSEO gefunden.</p>
+      )}
+      {profile && <ProfileBody profile={profile} />}
+    </div>
+  );
+}
+
+function ProfileBody({ profile }: { profile: BusinessProfile }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        {profile.isClaimed !== null &&
+          (profile.isClaimed ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600">
+              ✅ Profil beansprucht
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800"
+              title="Inhaber hat das Google-Profil nicht beansprucht – guter Outreach-Aufhänger"
+            >
+              ⚠️ Profil nicht beansprucht
+            </span>
+          ))}
+        {profile.priceLevel && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600">
+            {profile.priceLevel}
+          </span>
+        )}
+        {profile.totalPhotos != null && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+            📷 {profile.totalPhotos} Fotos
+          </span>
+        )}
+        {profile.ratingValue != null && (
+          <span className="inline-flex items-center rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 tabular-nums">
+            ⭐ {profile.ratingValue}
+            {profile.ratingVotes != null && ` · ${profile.ratingVotes}`}
+          </span>
+        )}
+      </div>
+
+      {profile.description && <p className="text-stone-600">{profile.description}</p>}
+
+      {(profile.category || profile.additionalCategories.length > 0) && (
+        <ChipRow
+          label="Kategorien"
+          items={[profile.category, ...profile.additionalCategories].filter(Boolean)}
+        />
+      )}
+      {profile.attributes.length > 0 && (
+        <ChipRow label="Ausstattung" items={profile.attributes.slice(0, 16)} />
+      )}
+      {profile.placeTopics.length > 0 && (
+        <ChipRow
+          label="Bewertungs-Themen"
+          items={profile.placeTopics.map((t) => `${t.topic}${t.count ? ` (${t.count})` : ""}`)}
+        />
+      )}
+
+      {(profile.bookOnlineUrl || profile.contactUrl) && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {profile.bookOnlineUrl && (
+            <a
+              href={profile.bookOnlineUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+            >
+              📅 Online buchen
+            </a>
+          )}
+          {profile.contactUrl && (
+            <a
+              href={profile.contactUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+            >
+              🔗 Kontaktseite
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChipRow({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((it, i) => (
+          <span
+            key={`${it}-${i}`}
+            className="rounded-md bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600"
+          >
+            {it}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
