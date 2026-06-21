@@ -83,6 +83,34 @@ export interface BusinessProfile {
   mainImage: string;
 }
 
+/**
+ * Website-Qualitäts-Check über DataForSEO (OnPage Instant Pages + Lighthouse).
+ * Beantwortet: gibt es eine Website, wie gut ist sie technisch/SEO-seitig
+ * optimiert. Felder sind null, wenn die jeweilige Analyse fehlschlug.
+ */
+export interface WebsiteCheck {
+  url: string;
+  /** OnPage-Optimierungs-Score (0–100). */
+  onpageScore: number | null;
+  /** Ladezeit in Millisekunden. */
+  loadTimeMs: number | null;
+  isHttps: boolean;
+  hasTitle: boolean | null;
+  hasDescription: boolean | null;
+  hasH1: boolean | null;
+  imagesHaveAlt: boolean | null;
+  wordCount: number | null;
+  /** Menschenlesbare Mängelliste (aus den OnPage-Checks abgeleitet). */
+  issues: string[];
+  onpageError: string | null;
+  /** Lighthouse-Scores, je 0–100. */
+  lhPerformance: number | null;
+  lhSeo: number | null;
+  lhBestPractices: number | null;
+  lhAccessibility: number | null;
+  lighthouseError: string | null;
+}
+
 export interface List {
   id: number;
   name: string;

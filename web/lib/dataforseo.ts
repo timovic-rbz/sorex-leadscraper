@@ -1,12 +1,20 @@
-import type { BusinessProfile, Lead } from "./types";
+import type { BusinessProfile, Lead, WebsiteCheck } from "./types";
 import { getApiKey } from "./api-keys";
-import { recordDataForSeoMapsSearch, recordDataForSeoMyBusinessInfo } from "./usage";
+import {
+  recordDataForSeoLighthouse,
+  recordDataForSeoMapsSearch,
+  recordDataForSeoMyBusinessInfo,
+  recordDataForSeoOnPage,
+} from "./usage";
 
 // Google-Maps-SERP, synchroner "Live"-Endpoint (kein Polling nötig).
 const MAPS_URL = "https://api.dataforseo.com/v3/serp/google/maps/live/advanced";
 // Einzelnes Business-Profil mit Detaildaten (Beschreibung, Attribute, is_claimed …).
 const MY_BUSINESS_INFO_URL =
   "https://api.dataforseo.com/v3/business_data/google/my_business_info/live";
+// Website-Analyse: schneller OnPage-Check + (langsamere) Lighthouse-Scores.
+const ONPAGE_INSTANT_URL = "https://api.dataforseo.com/v3/on_page/instant_pages";
+const LIGHTHOUSE_LIVE_URL = "https://api.dataforseo.com/v3/on_page/lighthouse/live/json";
 // location_code für Deutschland (DataForSEO-Standortkatalog).
 const LOCATION_CODE_DE = 2276;
 
@@ -310,4 +318,227 @@ function normalizeTopics(pt: DfsBizItem["place_topics"]): { topic: string; count
     .filter((t) => t.topic)
     .sort((a, b) => b.count - a.count)
     .slice(0, 12);
+}
+
+// =============================================================================
+// WEBSITE-CHECK – existiert eine Website und wie gut ist sie optimiert?
+// Kombiniert OnPage (schnell, SEO-Mängel) + Lighthouse (Scores, langsamer).
+// =============================================================================
+
+interface DfsOnPageChecks {
+  no_title?: boolean;
+  no_description?: boolean;
+  no_h1_tag?: boolean;
+  no_image_alt?: boolean;
+  no_favicon?: boolean;
+  high_loading_time?: boolean;
+  is_http?: boolean;
+  has_render_blocking_resources?: boolean;
+  low_content_rate?: boolean;
+  duplicate_title_tag?: boolean;
+  deprecated_html_tags?: boolean;
+}
+
+interface DfsOnPageItem {
+  onpage_score?: number;
+  status_code?: number;
+  page_timing?: { duration_time?: number };
+  meta?: { title?: string; description?: string };
+  content?: { plain_text_word_count?: number };
+  checks?: DfsOnPageChecks;
+}
+
+interface DfsOnPageResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: { items?: DfsOnPageItem[] }[] | null;
+  }[];
+}
+
+interface LhCategory {
+  score?: number | null;
+}
+interface LhCategories {
+  performance?: LhCategory;
+  seo?: LhCategory;
+  accessibility?: LhCategory;
+  "best-practices"?: LhCategory;
+  best_practices?: LhCategory;
+}
+interface LhResult {
+  categories?: LhCategories;
+  lighthouse?: { categories?: LhCategories };
+  lighthouse_result?: { categories?: LhCategories };
+  items?: { categories?: LhCategories }[];
+}
+interface DfsLhResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: LhResult[] | null;
+  }[];
+}
+
+/**
+ * Analysiert eine Website über DataForSEO. OnPage und Lighthouse laufen parallel
+ * und unabhängig: scheitert Lighthouse (z.B. Timeout), kommen die OnPage-Daten
+ * trotzdem zurück (und umgekehrt). Wirft nur, wenn BEIDE fehlschlagen.
+ */
+export async function checkWebsite(rawUrl: string, creds?: string): Promise<WebsiteCheck> {
+  const cred = (creds ?? (await credentials()) ?? "").trim();
+  if (!cred.includes(":")) {
+    throw new Error(
+      "Keine DataForSEO-Credentials konfiguriert. Unter Einstellungen im Format login:passwort hinterlegen.",
+    );
+  }
+  const auth = Buffer.from(cred).toString("base64");
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+  const headers = { Authorization: `Basic ${auth}`, "Content-Type": "application/json" };
+
+  const [onpageRes, lhRes] = await Promise.allSettled([
+    runOnPage(url, headers),
+    runLighthouse(url, headers),
+  ]);
+
+  const result: WebsiteCheck = {
+    url,
+    onpageScore: null,
+    loadTimeMs: null,
+    isHttps: url.toLowerCase().startsWith("https"),
+    hasTitle: null,
+    hasDescription: null,
+    hasH1: null,
+    imagesHaveAlt: null,
+    wordCount: null,
+    issues: [],
+    onpageError: null,
+    lhPerformance: null,
+    lhSeo: null,
+    lhBestPractices: null,
+    lhAccessibility: null,
+    lighthouseError: null,
+  };
+
+  if (onpageRes.status === "fulfilled") {
+    Object.assign(result, onpageRes.value);
+  } else {
+    result.onpageError = (onpageRes.reason as Error)?.message ?? "OnPage-Analyse fehlgeschlagen";
+  }
+  if (lhRes.status === "fulfilled") {
+    Object.assign(result, lhRes.value);
+  } else {
+    result.lighthouseError = (lhRes.reason as Error)?.message ?? "Lighthouse fehlgeschlagen";
+  }
+
+  if (onpageRes.status === "rejected" && lhRes.status === "rejected") {
+    throw new Error(result.onpageError ?? "Website-Analyse fehlgeschlagen");
+  }
+  return result;
+}
+
+async function runOnPage(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Partial<WebsiteCheck>> {
+  const r = await fetch(ONPAGE_INSTANT_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ url, enable_javascript: false }]),
+  });
+  if (!r.ok) throw new Error(`DataForSEO OnPage ${r.status}: ${(await r.text()).slice(0, 150)}`);
+  const data = (await r.json()) as DfsOnPageResponse;
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) {
+    throw new Error(`DataForSEO OnPage: ${task?.status_message ?? "Fehler"}`);
+  }
+  void recordDataForSeoOnPage();
+  const item = task.result?.[0]?.items?.[0];
+  if (!item) throw new Error("Keine OnPage-Daten erhalten");
+  const c = item.checks ?? {};
+  return {
+    onpageScore: item.onpage_score != null ? Math.round(item.onpage_score) : null,
+    loadTimeMs: item.page_timing?.duration_time ?? null,
+    isHttps: c.is_http === undefined ? url.toLowerCase().startsWith("https") : !c.is_http,
+    hasTitle: c.no_title === undefined ? null : !c.no_title,
+    hasDescription: c.no_description === undefined ? null : !c.no_description,
+    hasH1: c.no_h1_tag === undefined ? null : !c.no_h1_tag,
+    imagesHaveAlt: c.no_image_alt === undefined ? null : !c.no_image_alt,
+    wordCount: item.content?.plain_text_word_count ?? null,
+    issues: buildIssues(c),
+    onpageError: null,
+  };
+}
+
+const ISSUE_LABELS: { key: keyof DfsOnPageChecks; label: string }[] = [
+  { key: "no_title", label: "Kein Title-Tag" },
+  { key: "no_description", label: "Keine Meta-Description" },
+  { key: "no_h1_tag", label: "Keine H1-Überschrift" },
+  { key: "no_image_alt", label: "Bilder ohne Alt-Text" },
+  { key: "no_favicon", label: "Kein Favicon" },
+  { key: "high_loading_time", label: "Lange Ladezeit" },
+  { key: "is_http", label: "Kein HTTPS" },
+  { key: "has_render_blocking_resources", label: "Render-blockierende Ressourcen" },
+  { key: "low_content_rate", label: "Wenig Textinhalt" },
+  { key: "duplicate_title_tag", label: "Doppelter Title" },
+  { key: "deprecated_html_tags", label: "Veraltete HTML-Tags" },
+];
+
+function buildIssues(c: DfsOnPageChecks): string[] {
+  return ISSUE_LABELS.filter(({ key }) => c[key] === true).map(({ label }) => label);
+}
+
+async function runLighthouse(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Partial<WebsiteCheck>> {
+  // Lighthouse rendert die ganze Seite und dauert 20–40s. Hartes Timeout, damit
+  // die Vercel-Function nicht stirbt und die OnPage-Daten trotzdem zurückkommen.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45_000);
+  try {
+    const r = await fetch(LIGHTHOUSE_LIVE_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify([{ url, for_mobile: false }]),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error(`DataForSEO Lighthouse ${r.status}`);
+    const data = (await r.json()) as DfsLhResponse;
+    const task = data.tasks?.[0];
+    if (!task || task.status_code !== 20000) {
+      throw new Error(`DataForSEO Lighthouse: ${task?.status_message ?? "Fehler"}`);
+    }
+    void recordDataForSeoLighthouse();
+    const cats = findCategories(task.result?.[0]);
+    return {
+      lhPerformance: scoreToPct(cats?.performance?.score),
+      lhSeo: scoreToPct(cats?.seo?.score),
+      lhBestPractices: scoreToPct(cats?.["best-practices"]?.score ?? cats?.best_practices?.score),
+      lhAccessibility: scoreToPct(cats?.accessibility?.score),
+      lighthouseError: null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Lighthouse-JSON-Struktur variiert je nach DataForSEO-Version – defensiv suchen. */
+function findCategories(result: LhResult | undefined): LhCategories | null {
+  if (!result) return null;
+  return (
+    result.categories ??
+    result.lighthouse?.categories ??
+    result.lighthouse_result?.categories ??
+    result.items?.[0]?.categories ??
+    null
+  );
+}
+
+/** Lighthouse-Scores kommen als 0–1; auf 0–100 runden (tolerant, falls schon 0–100). */
+function scoreToPct(score: number | null | undefined): number | null {
+  if (score == null) return null;
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n <= 1 ? n * 100 : n);
 }

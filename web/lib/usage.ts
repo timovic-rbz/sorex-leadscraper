@@ -24,6 +24,12 @@ const DATAFORSEO_MAPS_USD = 0.002;
 // DataForSEO "Business Data – My Business Info Live" — ~$0.002 pro Profil-Abruf
 const DATAFORSEO_BUSINESS_INFO_USD = 0.002;
 
+// DataForSEO "OnPage – Instant Pages" — ~$0.00125 pro analysierter Seite
+const DATAFORSEO_ONPAGE_USD = 0.00125;
+
+// DataForSEO "OnPage – Lighthouse Live" — ~$0.003 pro Lighthouse-Lauf
+const DATAFORSEO_LIGHTHOUSE_USD = 0.003;
+
 // Anthropic Claude (Sonnet 4.5) — Input/Output in USD pro 1M Tokens
 const ANTHROPIC_INPUT_USD_PER_MTOK = 3.0;
 const ANTHROPIC_OUTPUT_USD_PER_MTOK = 15.0;
@@ -57,6 +63,14 @@ export async function recordDataForSeoMyBusinessInfo(): Promise<void> {
     1,
     DATAFORSEO_BUSINESS_INFO_USD * USD_TO_EUR,
   );
+}
+
+export async function recordDataForSeoOnPage(): Promise<void> {
+  await dbRecordUsage("dataforseo", "onpage_instant", 1, DATAFORSEO_ONPAGE_USD * USD_TO_EUR);
+}
+
+export async function recordDataForSeoLighthouse(): Promise<void> {
+  await dbRecordUsage("dataforseo", "lighthouse", 1, DATAFORSEO_LIGHTHOUSE_USD * USD_TO_EUR);
 }
 
 export async function recordAnthropicCall(inputTokens: number, outputTokens: number): Promise<void> {

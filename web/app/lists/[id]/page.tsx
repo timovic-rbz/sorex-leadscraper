@@ -11,6 +11,7 @@ import {
   type DbLead,
   type LeadStatus,
   type List,
+  type WebsiteCheck,
 } from "@/lib/types";
 import { GoogleProfileButton } from "@/components/GoogleProfileButton";
 
@@ -786,6 +787,9 @@ function LeadModal({
         {/* DataForSEO Business-Profil (on-demand) */}
         <BusinessProfileSection lead={lead} />
 
+        {/* DataForSEO Website-Check (on-demand) */}
+        <WebsiteCheckSection lead={lead} />
+
         {/* Status-Aktionen */}
         <div className="border-t border-stone-100 px-6 py-5">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -1092,6 +1096,148 @@ function ChipRow({ label, items }: { label: string; items: string[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Website-Check (DataForSEO OnPage + Lighthouse) – on-demand im Modal
+// ============================================================================
+
+function WebsiteCheckSection({ lead }: { lead: DbLead }) {
+  const [check, setCheck] = useState<WebsiteCheck | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasWebsite = Boolean(lead.webseite);
+
+  async function run() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/website-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: lead.webseite }),
+      });
+      const d = (await r.json()) as { check?: WebsiteCheck; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setCheck(d.check ?? null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-6 py-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-stone-500">
+          🌐 Website-Check
+        </span>
+        {hasWebsite && !check && (
+          <button
+            onClick={run}
+            disabled={loading}
+            className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            {loading ? "⏳ Analysiere…" : "Website prüfen"}
+          </button>
+        )}
+      </div>
+
+      {!hasWebsite ? (
+        <div className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-800 ring-1 ring-amber-100">
+          ⚠️ Keine Website hinterlegt — idealer Lead für einen Webauftritt.
+        </div>
+      ) : !check && !loading && !error ? (
+        <p className="text-[11px] text-stone-400">
+          Prüft die Website per DataForSEO (OnPage-Mängel + Lighthouse-Scores). Verbraucht ~0,5 ct,
+          Lighthouse kann ein paar Sekunden dauern.
+        </p>
+      ) : null}
+
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          ❌ {error}
+        </div>
+      )}
+      {check && <WebsiteCheckBody check={check} />}
+    </div>
+  );
+}
+
+function WebsiteCheckBody({ check }: { check: WebsiteCheck }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        {check.onpageScore != null && (
+          <ScorePill label="OnPage" value={check.onpageScore} />
+        )}
+        {check.lhPerformance != null && <ScorePill label="Performance" value={check.lhPerformance} />}
+        {check.lhSeo != null && <ScorePill label="SEO" value={check.lhSeo} />}
+        {check.lhBestPractices != null && (
+          <ScorePill label="Best Practices" value={check.lhBestPractices} />
+        )}
+        {check.lhAccessibility != null && (
+          <ScorePill label="Barrierefrei" value={check.lhAccessibility} />
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2 text-[11px] text-stone-500">
+        <span className={check.isHttps ? "text-emerald-600" : "text-rose-600"}>
+          {check.isHttps ? "🔒 HTTPS" : "⚠️ Kein HTTPS"}
+        </span>
+        {check.loadTimeMs != null && <span>· ⏱ {(check.loadTimeMs / 1000).toFixed(1)}s Ladezeit</span>}
+        {check.wordCount != null && <span>· 📝 {check.wordCount} Wörter</span>}
+      </div>
+
+      {check.issues.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">
+            SEO-Mängel
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {check.issues.map((it) => (
+              <span
+                key={it}
+                className="rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700"
+              >
+                {it}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {check.onpageScore != null && check.issues.length === 0 && (
+        <p className="text-[11px] text-emerald-600">✅ Keine groben OnPage-Mängel gefunden.</p>
+      )}
+
+      {check.onpageError && (
+        <p className="text-[11px] text-stone-400">OnPage nicht verfügbar: {check.onpageError}</p>
+      )}
+      {check.lighthouseError && (
+        <p className="text-[11px] text-stone-400">
+          Lighthouse nicht verfügbar: {check.lighthouseError}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Score-Pill mit Ampelfarbe (rot &lt;50, gelb &lt;90, grün ≥90 – Lighthouse-Konvention). */
+function ScorePill({ label, value }: { label: string; value: number }) {
+  const tone =
+    value >= 90
+      ? "bg-emerald-100 text-emerald-800"
+      : value >= 50
+        ? "bg-amber-100 text-amber-800"
+        : "bg-rose-100 text-rose-800";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${tone}`}>
+      <span className="tabular-nums">{value}</span>
+      <span className="font-medium opacity-80">{label}</span>
+    </span>
   );
 }
 
