@@ -9,6 +9,7 @@ import {
   LEAD_STATUS_ORDER,
   type CompetitorCheck,
   type DbLead,
+  type KeywordVolume,
   type LeadEnrichment,
   type LeadStatus,
   type List,
@@ -1206,6 +1207,7 @@ function InsightsPanel({ lead, enrichment }: { lead: DbLead; enrichment: LeadEnr
           initialKeywords={enrichment?.rankedKeywords ?? null}
         />
         <MarketCheckSection lead={lead} initial={enrichment?.market ?? null} />
+        <KeywordVolumeSection lead={lead} initial={enrichment?.keywordVolumes ?? null} />
         <CompetitorsSection lead={lead} initial={enrichment?.competitors ?? null} />
         <ReviewsSection lead={lead} initial={enrichment?.reviews ?? null} />
       </div>
@@ -1634,6 +1636,120 @@ function MarketBody({ market, hasWebsite }: { market: MarketCheck; hasWebsite: b
         </div>
       )}
     </div>
+  );
+}
+
+/** Google-Ads-Wettbewerb auf Deutsch. */
+function competitionDe(c: string): string {
+  return c === "HIGH" ? "hoch" : c === "MEDIUM" ? "mittel" : c === "LOW" ? "niedrig" : c;
+}
+
+// ============================================================================
+// Suchvolumen-Recherche (DataForSEO) – freie Keywords, on-demand im Modal
+// ============================================================================
+
+function KeywordVolumeSection({ lead, initial }: { lead: DbLead; initial: KeywordVolume[] | null }) {
+  const suggested = [`${lead.dienstleistung} ${lead.ort}`.trim(), lead.dienstleistung]
+    .filter(Boolean)
+    .join("\n");
+  const [input, setInput] = useState(
+    initial && initial.length ? initial.map((k) => k.keyword).join("\n") : suggested,
+  );
+  const [volumes, setVolumes] = useState<KeywordVolume[] | null>(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initial) {
+      setVolumes(initial);
+      setInput(initial.map((k) => k.keyword).join("\n"));
+    }
+  }, [initial]);
+
+  async function run() {
+    const keywords = input
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (keywords.length === 0) {
+      setError("Bitte mindestens ein Keyword eingeben.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/keyword-volume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: lead.uid, keywords }),
+      });
+      const d = (await r.json()) as { volumes?: KeywordVolume[]; error?: string };
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setVolumes(d.volumes ?? []);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const headerRight = (
+    <button
+      onClick={run}
+      disabled={loading}
+      className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+    >
+      {loading ? "⏳ Prüfe…" : volumes ? "↻ Neu prüfen" : "Suchvolumen prüfen"}
+    </button>
+  );
+
+  return (
+    <CollapsibleSection title="🔍 Suchvolumen-Recherche" loaded={Boolean(volumes)} headerRight={headerRight}>
+      <div className="space-y-3">
+        <div>
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">
+            Keywords / Dienstleistungen (eine pro Zeile)
+          </div>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            rows={3}
+            placeholder={`${lead.dienstleistung} ${lead.ort}\nz.B. weitere Dienstleistung…`}
+            className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm placeholder:text-stone-400 focus:border-rose-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-100"
+          />
+          <p className="mt-1 text-[11px] text-stone-400">
+            Ein DataForSEO-Call deckt alle Zeilen ab (~5 ct). „{lead.dienstleistung} {lead.ort}" =
+            lokal, „{lead.dienstleistung}" = deutschlandweit.
+          </p>
+        </div>
+        {error && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+            ❌ {error}
+          </div>
+        )}
+        {volumes && volumes.length === 0 && !loading && (
+          <p className="text-sm text-stone-500">Kein Suchvolumen gefunden.</p>
+        )}
+        {volumes && volumes.length > 0 && (
+          <ul className="space-y-1">
+            {volumes.map((v, i) => (
+              <li key={`${v.keyword}-${i}`} className="flex items-center gap-2 text-[12px]">
+                <span className="flex-1 truncate text-stone-600">{v.keyword}</span>
+                {v.competition && (
+                  <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500">
+                    {competitionDe(v.competition)}
+                  </span>
+                )}
+                <span className="w-24 shrink-0 text-right font-semibold tabular-nums text-stone-800">
+                  {v.searchVolume != null ? v.searchVolume.toLocaleString("de-DE") : "—"}
+                  <span className="font-normal text-stone-400">/Mo</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </CollapsibleSection>
   );
 }
 

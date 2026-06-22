@@ -1,5 +1,6 @@
 import type {
   CompetitorCheck,
+  KeywordVolume,
   Lead,
   MarketCheck,
   RankedKeyword,
@@ -584,6 +585,40 @@ async function runSearchVolume(
     competition: item?.competition ?? "",
     cpc: item?.cpc ?? null,
   };
+}
+
+/**
+ * Freie Suchvolumen-Recherche: beliebige Keywords/Dienstleistungen auf einmal
+ * (ein Request deckt bis zu 1000 Keywords zum gleichen Preis ab, ~5 ct).
+ * Sortiert nach Suchvolumen absteigend.
+ */
+export async function getKeywordVolumes(keywords: string[]): Promise<KeywordVolume[]> {
+  const cleaned = [...new Set(keywords.map((k) => k.trim().toLowerCase()).filter(Boolean))].slice(0, 30);
+  if (cleaned.length === 0) return [];
+
+  const headers = { Authorization: await authHeader(), "Content-Type": "application/json" };
+  const r = await fetch(SEARCH_VOLUME_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ keywords: cleaned, language_code: "de", location_code: LOCATION_CODE_DE }]),
+  });
+  if (!r.ok) throw await dfsHttpError("DataForSEO Keywords", r);
+  const data = (await r.json()) as DfsVolResponse;
+  const task = data.tasks?.[0];
+  if (!task || task.status_code !== 20000) {
+    throw new Error(`DataForSEO Keywords: ${task?.status_message ?? "Fehler"}`);
+  }
+  void recordDataForSeoSearchVolume();
+
+  return (task.result ?? [])
+    .filter((i): i is DfsVolItem & { keyword: string } => Boolean(i?.keyword))
+    .map((i) => ({
+      keyword: i.keyword,
+      searchVolume: i.search_volume ?? null,
+      competition: i.competition ?? "",
+      cpc: i.cpc ?? null,
+    }))
+    .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0));
 }
 
 // =============================================================================

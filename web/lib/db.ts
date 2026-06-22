@@ -3,6 +3,7 @@ import type {
   CommissionSummary,
   CompetitorCheck,
   DbLead,
+  KeywordVolume,
   LeaderboardRow,
   Lead,
   LeadEnrichment,
@@ -708,6 +709,11 @@ export async function dbSaveLeadCompetitors(uid: string, competitors: Competitor
 export async function dbSaveLeadRankedKeywords(uid: string, rankedKeywords: RankedKeyword[]): Promise<void> {
   await ensureSchema();
   await mergeEnrichment(uid, { rankedKeywords, rankedKeywordsAt: new Date().toISOString() });
+}
+
+export async function dbSaveLeadKeywordVolumes(uid: string, keywordVolumes: KeywordVolume[]): Promise<void> {
+  await ensureSchema();
+  await mergeEnrichment(uid, { keywordVolumes, keywordVolumesAt: new Date().toISOString() });
 }
 
 // =============================================================================

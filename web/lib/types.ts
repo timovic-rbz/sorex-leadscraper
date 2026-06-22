@@ -111,6 +111,14 @@ export interface ReviewItem {
   author: string;
 }
 
+/** Suchvolumen-Ergebnis für ein frei recherchiertes Keyword/eine Dienstleistung. */
+export interface KeywordVolume {
+  keyword: string;
+  searchVolume: number | null;
+  competition: string;
+  cpc: number | null;
+}
+
 /** Ein Keyword, für das die Website bei Google rankt. */
 export interface RankedKeyword {
   keyword: string;
@@ -161,6 +169,8 @@ export interface LeadEnrichment {
   competitorsAt?: string;
   rankedKeywords?: RankedKeyword[];
   rankedKeywordsAt?: string;
+  keywordVolumes?: KeywordVolume[];
+  keywordVolumesAt?: string;
 }
 
 export interface List {
