@@ -1649,39 +1649,28 @@ function competitionDe(c: string): string {
 // ============================================================================
 
 function KeywordVolumeSection({ lead, initial }: { lead: DbLead; initial: KeywordVolume[] | null }) {
-  const suggested = [`${lead.dienstleistung} ${lead.ort}`.trim(), lead.dienstleistung]
-    .filter(Boolean)
-    .join("\n");
-  const [input, setInput] = useState(
-    initial && initial.length ? initial.map((k) => k.keyword).join("\n") : suggested,
-  );
+  const [seed, setSeed] = useState(lead.dienstleistung || "");
   const [volumes, setVolumes] = useState<KeywordVolume[] | null>(initial);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initial) {
-      setVolumes(initial);
-      setInput(initial.map((k) => k.keyword).join("\n"));
-    }
+    if (initial) setVolumes(initial);
   }, [initial]);
 
   async function run() {
-    const keywords = input
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (keywords.length === 0) {
-      setError("Bitte mindestens ein Keyword eingeben.");
+    const term = seed.trim();
+    if (!term) {
+      setError("Bitte ein Seed-Keyword (z.B. die Dienstleistung) eingeben.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/keyword-volume", {
+      const r = await fetch("/api/keyword-ideas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: lead.uid, keywords }),
+        body: JSON.stringify({ uid: lead.uid, seed: term }),
       });
       const d = (await r.json()) as { volumes?: KeywordVolume[]; error?: string };
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
@@ -1699,27 +1688,27 @@ function KeywordVolumeSection({ lead, initial }: { lead: DbLead; initial: Keywor
       disabled={loading}
       className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
     >
-      {loading ? "⏳ Prüfe…" : volumes ? "↻ Neu prüfen" : "Suchvolumen prüfen"}
+      {loading ? "⏳ Suche…" : volumes ? "↻ Neu" : "Keyword-Ideen holen"}
     </button>
   );
 
   return (
-    <CollapsibleSection title="🔍 Suchvolumen-Recherche" loaded={Boolean(volumes)} headerRight={headerRight}>
+    <CollapsibleSection title="🔍 Keyword-Ideen (Traffic)" loaded={Boolean(volumes)} headerRight={headerRight}>
       <div className="space-y-3">
         <div>
           <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-stone-400">
-            Keywords / Dienstleistungen (eine pro Zeile)
+            Seed (Dienstleistung) — wonach die Zielgruppe sucht
           </div>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            rows={3}
-            placeholder={`${lead.dienstleistung} ${lead.ort}\nz.B. weitere Dienstleistung…`}
+          <input
+            value={seed}
+            onChange={(e) => setSeed(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && run()}
+            placeholder="z.B. Kosmetik"
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm placeholder:text-stone-400 focus:border-rose-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-100"
           />
           <p className="mt-1 text-[11px] text-stone-400">
-            Ein DataForSEO-Call deckt alle Zeilen ab (~5 ct). „{lead.dienstleistung} {lead.ort}" =
-            lokal, „{lead.dienstleistung}" = deutschlandweit.
+            DataForSEO schlägt die Suchbegriffe vor, mit denen Interessenten so einen Anbieter finden
+            – inkl. monatlichem Suchvolumen. ~1 ct, danach gecacht.
           </p>
         </div>
         {error && (
@@ -1728,7 +1717,7 @@ function KeywordVolumeSection({ lead, initial }: { lead: DbLead; initial: Keywor
           </div>
         )}
         {volumes && volumes.length === 0 && !loading && (
-          <p className="text-sm text-stone-500">Kein Suchvolumen gefunden.</p>
+          <p className="text-sm text-stone-500">Keine Keyword-Ideen gefunden.</p>
         )}
         {volumes && volumes.length > 0 && (
           <ul className="space-y-1">

@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { getApiKey } from "./api-keys";
 import {
+  recordDataForSeoKeywordIdeas,
   recordDataForSeoLighthouse,
   recordDataForSeoMapsSearch,
   recordDataForSeoOnPage,
@@ -33,6 +34,9 @@ const REVIEWS_GET_URL = "https://api.dataforseo.com/v3/business_data/google/revi
 // Keywords, für die eine Domain bei Google rankt (DataForSEO Labs).
 const RANKED_KEYWORDS_URL =
   "https://api.dataforseo.com/v3/dataforseo_labs/google/ranked_keywords/live";
+// Keyword-Ideen: wonach die Zielgruppe sucht (DataForSEO Labs).
+const KEYWORD_IDEAS_URL =
+  "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_ideas/live";
 // location_code für Deutschland (DataForSEO-Standortkatalog).
 const LOCATION_CODE_DE = 2276;
 
@@ -587,38 +591,64 @@ async function runSearchVolume(
   };
 }
 
+interface DfsIdeaItem {
+  keyword?: string;
+  keyword_info?: {
+    search_volume?: number | null;
+    competition_level?: string | null;
+    cpc?: number | null;
+  };
+}
+interface DfsIdeaResponse {
+  tasks?: {
+    status_code?: number;
+    status_message?: string;
+    result?: { items?: DfsIdeaItem[] }[] | null;
+  }[];
+}
+
 /**
- * Freie Suchvolumen-Recherche: beliebige Keywords/Dienstleistungen auf einmal
- * (ein Request deckt bis zu 1000 Keywords zum gleichen Preis ab, ~5 ct).
- * Sortiert nach Suchvolumen absteigend.
+ * Keyword-Ideen für einen Seed (z.B. die Dienstleistung): die Suchbegriffe,
+ * mit denen die Zielgruppe nach so einem Angebot sucht – also was Interessenten
+ * auf die Website bringt. Inkl. Suchvolumen & Wettbewerb, sortiert nach Volumen.
+ * DataForSEO Labs "Keyword Ideas".
  */
-export async function getKeywordVolumes(keywords: string[]): Promise<KeywordVolume[]> {
-  const cleaned = [...new Set(keywords.map((k) => k.trim().toLowerCase()).filter(Boolean))].slice(0, 30);
-  if (cleaned.length === 0) return [];
+export async function getKeywordIdeas(seed: string): Promise<KeywordVolume[]> {
+  const term = seed.trim().toLowerCase();
+  if (!term) return [];
 
   const headers = { Authorization: await authHeader(), "Content-Type": "application/json" };
-  const r = await fetch(SEARCH_VOLUME_URL, {
+  const r = await fetch(KEYWORD_IDEAS_URL, {
     method: "POST",
     headers,
-    body: JSON.stringify([{ keywords: cleaned, language_code: "de", location_code: LOCATION_CODE_DE }]),
+    body: JSON.stringify([
+      {
+        keywords: [term],
+        language_code: "de",
+        location_code: LOCATION_CODE_DE,
+        limit: 50,
+        order_by: ["keyword_info.search_volume,desc"],
+      },
+    ]),
   });
-  if (!r.ok) throw await dfsHttpError("DataForSEO Keywords", r);
-  const data = (await r.json()) as DfsVolResponse;
+  if (!r.ok) throw await dfsHttpError("DataForSEO Keyword-Ideen", r);
+  const data = (await r.json()) as DfsIdeaResponse;
   const task = data.tasks?.[0];
   if (!task || task.status_code !== 20000) {
-    throw new Error(`DataForSEO Keywords: ${task?.status_message ?? "Fehler"}`);
+    throw new Error(`DataForSEO Keyword-Ideen: ${task?.status_message ?? "Fehler"}`);
   }
-  void recordDataForSeoSearchVolume();
+  void recordDataForSeoKeywordIdeas();
 
-  return (task.result ?? [])
-    .filter((i): i is DfsVolItem & { keyword: string } => Boolean(i?.keyword))
+  return (task.result?.[0]?.items ?? [])
+    .filter((i) => i.keyword)
     .map((i) => ({
-      keyword: i.keyword,
-      searchVolume: i.search_volume ?? null,
-      competition: i.competition ?? "",
-      cpc: i.cpc ?? null,
+      keyword: i.keyword as string,
+      searchVolume: i.keyword_info?.search_volume ?? null,
+      competition: i.keyword_info?.competition_level ?? "",
+      cpc: i.keyword_info?.cpc ?? null,
     }))
-    .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0));
+    .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
+    .slice(0, 30);
 }
 
 // =============================================================================
