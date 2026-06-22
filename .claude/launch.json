@@ -7,6 +7,13 @@
       "runtimeArgs": ["--prefix", "web", "run", "dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "mh-kosmetik",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "websites/mh-kosmetik", "run", "dev"],
+      "port": 3100,
+      "autoPort": true
     }
   ]
 }
