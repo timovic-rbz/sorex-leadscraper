@@ -158,14 +158,23 @@ export async function searchDataForSeo(
   return items.slice(0, maxResults).map((i) => itemToLead(i, service, city));
 }
 
-/** Credentials aus DB (Settings) oder Env-Var. */
+/**
+ * Credentials aus DB (Settings) oder Env-Var, sauber für Basic-Auth aufbereitet.
+ * Entfernt ALLE Whitespace-/Steuerzeichen (Copy-Paste-Artefakte wie Zeilenumbruch
+ * oder geschütztes Leerzeichen) – login:passwort enthält nie Leerzeichen, daher
+ * unbedenklich. Verhindert kaputte Auth-Header ("string did not match pattern").
+ */
 async function credentials(): Promise<string | null> {
   const stored = await getApiKey("dataforseo");
-  if (stored) return stored;
-  const login = process.env.DATAFORSEO_LOGIN?.trim();
-  const password = process.env.DATAFORSEO_PASSWORD?.trim();
-  if (login && password) return `${login}:${password}`;
-  return null;
+  const raw =
+    stored ??
+    (process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD
+      ? `${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`
+      : null);
+  if (!raw) return null;
+  // \s deckt u.a. \n \r \t und reguläres Leerzeichen ab; zusätzlich NBSP/Zero-Width.
+  const clean = raw.replace(/[\s\u00A0\u200B-\u200D\uFEFF]+/g, "");
+  return clean || null;
 }
 
 function itemToLead(i: DfsMapsItem, service: string, city: string): Lead {
