@@ -29,3 +29,6 @@ node_modules/
 .vscode/
 .idea/
 *.swp
+
+# Eigenständige Websites – gehören nicht zum Scraper-Repo
+websites/
