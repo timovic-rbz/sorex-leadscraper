@@ -1,20 +1,23 @@
-import { createHmac } from "node:crypto";
 import type { DbLead, LeadStatus } from "./types";
 
 // =============================================================================
 // Sales-Hub-Webhook
 // =============================================================================
 // Pusht qualifizierte Leads an den "Volles Studio Sales Hub", sobald ihr Status
-// auf "interested" oder "call_scheduled" wechselt. Dort laufen Closing-Skript,
-// Cal.com-Termin + Erinnerungen (24h/2h) und die weitere Pipeline.
+// auf "interested" oder "call_scheduled" wechselt.
+//
+// Vertrag (vom Hub vorgegeben):
+//   POST <SALESHUB_WEBHOOK_URL>            (z.B. .../api/webhooks/scraper-leads)
+//   Header: x-webhook-secret: <SALESHUB_WEBHOOK_SECRET>
+//   Body:   { "leads": [ { company_name, phone, emails[], website,
+//                          category, city, contact_name } ] }
 //
 // Konfiguration (Vercel → sorex-leadscraper → Environment Variables):
-//   SALESHUB_WEBHOOK_URL     – HTTPS-Endpoint des Sales Hub (Pflicht, sonst No-Op)
-//   SALESHUB_WEBHOOK_SECRET  – Shared Secret für die HMAC-Signatur (Pflicht)
+//   SALESHUB_WEBHOOK_URL     – Endpoint des Sales Hub (Pflicht, sonst No-Op)
+//   SALESHUB_WEBHOOK_SECRET  – Shared Secret für den x-webhook-secret-Header
 //   SALESHUB_WEBHOOK_TIMEOUT – optional, ms (Default 3500)
 //
-// Ist keine URL/Secret gesetzt, ist der Aufruf ein No-Op – lokal und in
-// Vorschau-Deployments passiert also nichts.
+// Leer = No-Op (lokal/Preview passiert nichts).
 
 /** Status-Übergänge, die einen Push auslösen. */
 const NOTIFY_ON: ReadonlySet<LeadStatus> = new Set<LeadStatus>([
@@ -22,38 +25,19 @@ const NOTIFY_ON: ReadonlySet<LeadStatus> = new Set<LeadStatus>([
   "call_scheduled",
 ]);
 
-export interface SalesHubPayload {
-  /** Stabiler Lead-Schlüssel (Primary Key) – nutzt der Hub als Idempotenz-/Upsert-Key. */
-  uid: string;
-  firmenname: string | null;
-  telefon: string | null;
-  email: string | null;
-  ort: string | null;
-  /** snake_case-DB-Wert: "interested" | "call_scheduled". */
-  lead_status: LeadStatus;
-  /** Bei "call_scheduled" das Wunsch-/Termindatum (ISO), sonst ggf. Wiedervorlage. */
-  next_action_at: string | null;
-  /** Vorheriger Status – Kontext für den Hub (z.B. Erst-Eintritt vs. Re-Entry). */
-  from_status: LeadStatus | null;
-  /** Zeitpunkt des Status-Wechsels (ISO) – zusammen mit uid dedupe-fähig. */
-  event_at: string;
-}
-
 /**
  * Feuert den Webhook bei einem Status-Wechsel in eine qualifizierte Stufe.
  *
- * Bewusst so gebaut, dass es den Status-Save NIE fachlich blockiert:
- *  - Das UPDATE auf `leads` ist beim Aufruf bereits committed.
- *  - Wir warten zwar auf den Webhook (Serverless-Functions werden nach der
- *    Response eingefroren, ein un-awaiteter Fetch würde sonst evtl. nie raus),
- *    ABER mit hartem Timeout und ohne je zu werfen. Schlägt der Hub fehl,
- *    bleibt der Lead trotzdem korrekt gespeichert.
+ * Blockiert den Status-Save nie fachlich: Das UPDATE auf `leads` ist beim
+ * Aufruf bereits committed. Wir warten zwar auf den Webhook (Serverless-
+ * Functions werden nach der Response eingefroren), aber mit hartem Timeout und
+ * ohne je zu werfen – schlägt der Hub fehl, bleibt der Lead korrekt gespeichert.
  *
- * @returns true, wenn der Hub 2xx geliefert hat; sonst false (auch bei No-Op).
+ * @returns true bei 2xx vom Hub; sonst false (auch bei No-Op).
  */
 export async function notifySalesHub(
   lead: DbLead,
-  fromStatus: LeadStatus | null,
+  _fromStatus: LeadStatus | null,
   toStatus: LeadStatus,
 ): Promise<boolean> {
   if (!NOTIFY_ON.has(toStatus)) return false;
@@ -62,25 +46,20 @@ export async function notifySalesHub(
   const secret = process.env.SALESHUB_WEBHOOK_SECRET?.trim();
   if (!url || !secret) return false; // nicht konfiguriert → No-Op
 
-  const payload: SalesHubPayload = {
-    uid: lead.uid,
-    firmenname: lead.firmenname || null,
-    telefon: lead.telefon || null,
-    email: lead.email || null,
-    ort: lead.ort || null,
-    lead_status: toStatus,
-    next_action_at: lead.nextActionAt ?? null,
-    from_status: fromStatus,
-    event_at: new Date().toISOString(),
-  };
-
-  // Stripe-Style-Signatur: HMAC-SHA256 über `${timestamp}.${body}`.
-  // Der Hub prüft so Echtheit UND Replay (timestamp-Fenster, z.B. ±5 min).
-  const body = JSON.stringify(payload);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${body}`)
-    .digest("hex");
+  // Feld-Mapping auf den vom Hub erwarteten Vertrag (snake_case, emails als Array).
+  const body = JSON.stringify({
+    leads: [
+      {
+        company_name: lead.firmenname || null,
+        phone: lead.telefon || null,
+        emails: lead.email ? [lead.email] : [],
+        website: lead.webseite || null,
+        category: lead.kategorie || null,
+        city: lead.ort || null,
+        contact_name: lead.qualifiedInfo?.ansprechpartner || null,
+      },
+    ],
+  });
 
   const timeoutMs = Number(process.env.SALESHUB_WEBHOOK_TIMEOUT ?? 3500);
   const ac = new AbortController();
@@ -91,9 +70,7 @@ export async function notifySalesHub(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-saleshub-timestamp": timestamp,
-        "x-saleshub-signature": `sha256=${signature}`,
-        "x-saleshub-event": "lead.qualified",
+        "x-webhook-secret": secret,
       },
       body,
       signal: ac.signal,
