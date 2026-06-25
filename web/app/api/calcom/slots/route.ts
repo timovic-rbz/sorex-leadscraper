@@ -22,7 +22,10 @@ export async function GET(req: Request) {
   }
 
   try {
-    const slots = await getSlots({ start: `${date}T00:00:00Z`, end: `${date}T23:59:59Z` });
+    // Cal.com /slots: `end` ist exklusiv (Folgetag), Daten als YYYY-MM-DD.
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const slots = await getSlots({ start: date, end: next.toISOString().slice(0, 10) });
     return NextResponse.json({ slots, timeZone: calcomTimeZone() });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });

@@ -8,7 +8,15 @@
 //   CALCOM_TIMEZONE       – optional, Default "Europe/Berlin"
 
 const BASE = "https://api.cal.com/v2";
-const API_VERSION = "2026-02-25"; // cal-api-version, vgl. Cal.com v2 Docs
+// Slots UND Bookings laufen mit 2024-08-13 (Cal.com v2 Docs). Falsche/fehlende
+// Version → 404. Per Env übersteuerbar, falls Cal.com die Version mal ändert.
+const DEFAULT_API_VERSION = "2024-08-13";
+// "Kennenlerngespräch" (Volles Studio) – derselbe Event-Type wie im Sales Hub.
+const DEFAULT_EVENT_TYPE_ID = 6067597;
+
+function apiVersion(): string {
+  return process.env.CALCOM_API_VERSION?.trim() || DEFAULT_API_VERSION;
+}
 
 function apiKey(): string {
   const k = process.env.CALCOM_API_KEY?.trim();
@@ -18,8 +26,9 @@ function apiKey(): string {
 
 function eventTypeId(): number {
   const raw = process.env.CALCOM_EVENT_TYPE_ID?.trim();
-  const n = raw ? Number(raw) : NaN;
-  if (!Number.isFinite(n)) throw new Error("CALCOM_EVENT_TYPE_ID ist nicht gesetzt/ungültig");
+  if (!raw) return DEFAULT_EVENT_TYPE_ID;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error("CALCOM_EVENT_TYPE_ID ist ungültig");
   return n;
 }
 
@@ -27,9 +36,9 @@ export function calcomTimeZone(): string {
   return process.env.CALCOM_TIMEZONE?.trim() || "Europe/Berlin";
 }
 
-/** true, wenn Key + Event-Type gesetzt sind – sonst ist das Feature ein No-Op. */
+/** true, sobald der API-Key gesetzt ist (Event-Type hat einen Default). */
 export function calcomConfigured(): boolean {
-  return Boolean(process.env.CALCOM_API_KEY?.trim() && process.env.CALCOM_EVENT_TYPE_ID?.trim());
+  return Boolean(process.env.CALCOM_API_KEY?.trim());
 }
 
 async function calFetch(path: string, init: RequestInit): Promise<unknown> {
@@ -37,7 +46,7 @@ async function calFetch(path: string, init: RequestInit): Promise<unknown> {
     ...init,
     headers: {
       Authorization: `Bearer ${apiKey()}`,
-      "cal-api-version": API_VERSION,
+      "cal-api-version": apiVersion(),
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
