@@ -197,6 +197,10 @@ export interface QualifiedInfo {
   demoTermin?: string | null;
   unterlagen?: string;
   naechsteSchritte?: string;
+  /** Cal.com-Buchungsreferenz, gesetzt bei echter Terminbuchung (siehe lib/calcom.ts). */
+  calBookingUid?: string | null;
+  calBookingUrl?: string | null;
+  calBookedAt?: string | null;
 }
 
 export interface DbLeadCrm {

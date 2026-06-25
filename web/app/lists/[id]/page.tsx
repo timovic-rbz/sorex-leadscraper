@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { use } from "react";
+import { CalBooking } from "@/components/CalBooking";
 import {
   LEAD_STATUS_META,
   LEAD_STATUS_ORDER,
@@ -796,6 +797,9 @@ function LeadModal({
     if (ok) onSaved(false); // nur Notiz gespeichert → Fenster schließen, nicht springen
   }
 
+  // Cal.com-Buchungspanel ein-/ausklappen.
+  const [showCal, setShowCal] = useState(false);
+
   // Kunden-Kündigung umschalten (stoppt/startet die wiederkehrende Setting-Fee).
   const [churned, setChurned] = useState(Boolean(lead.customerChurnedAt));
   async function toggleChurn() {
@@ -1024,12 +1028,27 @@ function LeadModal({
               >
                 🔄 Wiedervorlage
               </button>
-              <button onClick={scheduleCall} disabled={busy} className="rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50">
+              <button onClick={scheduleCall} disabled={busy} className="rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50" title="Status + Datum manuell setzen (ohne Kalendereintrag)">
                 📅 Call vereinbart
               </button>
               <button onClick={() => setStatus("lost")} disabled={busy} className="btn-ghost">🪦 Verloren</button>
               <button onClick={() => setStatus("new")} disabled={busy} className="btn-ghost">↩️ Auf Neu</button>
             </div>
+
+            {/* Echte Cal.com-Buchung (Kalendereintrag + Mail an den Interessenten) */}
+            <button
+              onClick={() => setShowCal((v) => !v)}
+              className="mt-3 text-sm font-medium text-purple-700 hover:text-purple-800"
+            >
+              {showCal ? "▾ Cal.com-Termin schließen" : "▸ Termin via Cal.com buchen"}
+            </button>
+            {showCal && (
+              <CalBooking
+                lead={{ uid: lead.uid, firmenname: lead.firmenname, email: lead.email }}
+                busy={busy}
+                onBooked={() => onSaved(true)}
+              />
+            )}
           </div>
         </div>
 
