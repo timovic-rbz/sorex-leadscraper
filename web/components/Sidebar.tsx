@@ -328,6 +328,19 @@ function MobileTopBar({
             💵 {usd(commission.monthTotal)}
           </span>
         )}
+        {INTERNAL_TOOLS.filter((tool) => !tool.current).map((tool) => (
+          <a
+            key={tool.href}
+            href={tool.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-50 text-base"
+            title={`${tool.label} öffnen`}
+            aria-label={`${tool.label} öffnen`}
+          >
+            {tool.emoji}
+          </a>
+        ))}
         <button
           onClick={openPhoneSearch}
           className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-base text-stone-700"
