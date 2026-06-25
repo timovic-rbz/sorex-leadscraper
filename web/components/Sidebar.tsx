@@ -33,6 +33,21 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings", icon: <SettingsIcon />, adminOnly: true },
 ];
 
+// Sprung zwischen den internen Tools (Sales Hub / Leadscraper / …).
+// `current: true` = dieses Tool (hervorgehoben, kein ↗). Neue Tools einfach
+// hier ergänzen, z.B. Onboarding sobald die URL steht.
+interface ToolLink {
+  href: string;
+  label: string;
+  emoji: string;
+  current?: boolean;
+}
+
+const INTERNAL_TOOLS: ToolLink[] = [
+  { href: "https://sales-hub-volles-studio.vercel.app/heute", label: "Sales Hub", emoji: "🎯" },
+  { href: "/lists", label: "Leadscraper", emoji: "🔍", current: true },
+];
+
 export default function Sidebar({ session }: { session: SessionInfo }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -147,6 +162,40 @@ function DesktopSidebar({
       </nav>
 
       <div className="mt-auto flex flex-col gap-2">
+        {/* Sprung in die anderen internen Tools */}
+        <div className="rounded-2xl border border-stone-200 p-2">
+          <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+            Interne Tools
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {INTERNAL_TOOLS.map((tool) => {
+              const cls = `flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium transition ${
+                tool.current ? "bg-rose-50 text-rose-700" : "text-stone-600 hover:bg-stone-100"
+              }`;
+              if (tool.current) {
+                return (
+                  <Link key={tool.href} href={tool.href} className={cls}>
+                    <span className="text-base">{tool.emoji}</span>
+                    <span className="flex-1">{tool.label}</span>
+                  </Link>
+                );
+              }
+              return (
+                <a
+                  key={tool.href}
+                  href={tool.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cls}
+                >
+                  <span className="text-base">{tool.emoji}</span>
+                  <span className="flex-1">{tool.label}</span>
+                  <ExternalIcon />
+                </a>
+              );
+            })}
+          </div>
+        </div>
         {commission && commission.monthTotal > 0 && (
           <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-emerald-50 px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
@@ -374,6 +423,16 @@ function LogoutIcon() {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-stone-400">
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
     </svg>
   );
 }
