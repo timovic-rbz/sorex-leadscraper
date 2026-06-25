@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { use } from "react";
-import { CalBooking } from "@/components/CalBooking";
 import {
   LEAD_STATUS_META,
   LEAD_STATUS_ORDER,
@@ -797,9 +796,6 @@ function LeadModal({
     if (ok) onSaved(false); // nur Notiz gespeichert → Fenster schließen, nicht springen
   }
 
-  // Cal.com-Buchungspanel ein-/ausklappen.
-  const [showCal, setShowCal] = useState(false);
-
   // Kunden-Kündigung umschalten (stoppt/startet die wiederkehrende Setting-Fee).
   const [churned, setChurned] = useState(Boolean(lead.customerChurnedAt));
   async function toggleChurn() {
@@ -821,6 +817,20 @@ function LeadModal({
     if (nextActionAt) extra.nextActionAt = new Date(nextActionAt).toISOString();
     await setStatus("follow_up", extra);
   }
+
+  // Cal.com-Terminplaner-Link, vorausgefüllt mit Name + E-Mail des Leads.
+  const calBookingUrl = (() => {
+    const base =
+      process.env.NEXT_PUBLIC_CALCOM_BOOKING_URL || "https://cal.com/volles-studio/30min";
+    try {
+      const u = new URL(base);
+      if (lead.firmenname) u.searchParams.set("name", lead.firmenname);
+      if (lead.email) u.searchParams.set("email", lead.email);
+      return u.toString();
+    } catch {
+      return base;
+    }
+  })();
 
   const currentMeta = LEAD_STATUS_META[lead.leadStatus ?? "new"];
   const today = getTodayHours(lead.oeffnungszeiten);
@@ -1035,20 +1045,17 @@ function LeadModal({
               <button onClick={() => setStatus("new")} disabled={busy} className="btn-ghost">↩️ Auf Neu</button>
             </div>
 
-            {/* Echte Cal.com-Buchung (Kalendereintrag + Mail an den Interessenten) */}
-            <button
-              onClick={() => setShowCal((v) => !v)}
-              className="mt-3 text-sm font-medium text-purple-700 hover:text-purple-800"
+            {/* Cal.com-Terminplaner öffnen (vorausgefüllt mit Name + E-Mail).
+                Cal.com macht Kalendereintrag + Mail; der Hub sieht den Termin über
+                denselben Kalender. Danach Lead manuell auf "Call vereinbart" setzen. */}
+            <a
+              href={calBookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-2 rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700"
             >
-              {showCal ? "▾ Cal.com-Termin schließen" : "▸ Termin via Cal.com buchen"}
-            </button>
-            {showCal && (
-              <CalBooking
-                lead={{ uid: lead.uid, firmenname: lead.firmenname, email: lead.email }}
-                busy={busy}
-                onBooked={() => onSaved(true)}
-              />
-            )}
+              📅 Termin via Cal.com buchen ↗
+            </a>
           </div>
         </div>
 
