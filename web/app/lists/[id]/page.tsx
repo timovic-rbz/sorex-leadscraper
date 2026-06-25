@@ -803,6 +803,27 @@ function LeadModal({
     if (ok) setChurned(!churned);
   }
 
+  // E-Mail des Leads – lokal, damit ein frischer Website-Crawl sofort den
+  // Cal.com-Link + die Kontaktanzeige aktualisiert.
+  const [email, setEmail] = useState(lead.email ?? "");
+  const [findingEmail, setFindingEmail] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  async function findEmail() {
+    setFindingEmail(true);
+    setEmailMsg(null);
+    try {
+      const r = await fetch(`/api/leads/${encodeURIComponent(lead.uid)}/find-email`, { method: "POST" });
+      const data = (await r.json().catch(() => ({}))) as { email?: string; error?: string };
+      if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+      if (data.email) setEmail(data.email);
+      else setEmailMsg("Keine E-Mail auf der Website gefunden");
+    } catch (e) {
+      setEmailMsg((e as Error).message);
+    } finally {
+      setFindingEmail(false);
+    }
+  }
+
   async function scheduleCall() {
     if (!nextActionAt) {
       setErrorMsg("Bitte Termin-Datum wählen");
@@ -825,7 +846,7 @@ function LeadModal({
     try {
       const u = new URL(base);
       if (lead.firmenname) u.searchParams.set("name", lead.firmenname);
-      if (lead.email) u.searchParams.set("email", lead.email);
+      if (email) u.searchParams.set("email", email);
       return u.toString();
     } catch {
       return base;
@@ -923,7 +944,7 @@ function LeadModal({
             </div>
           )}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <ContactPill href={lead.email ? `mailto:${lead.email}` : undefined} icon="✉️" label={lead.email || "Keine E-Mail"} disabled={!lead.email} />
+            <ContactPill href={email ? `mailto:${email}` : undefined} icon="✉️" label={email || "Keine E-Mail"} disabled={!email} />
             <ContactPill href={lead.webseite || undefined} icon="🌐" label="Webseite" external disabled={!lead.webseite} />
             <ContactPill
               href={`https://www.google.com/search?q=${encodeURIComponent([lead.firmenname, lead.ort].filter(Boolean).join(" "))}`}
@@ -1048,14 +1069,33 @@ function LeadModal({
             {/* Cal.com-Terminplaner öffnen (vorausgefüllt mit Name + E-Mail).
                 Cal.com macht Kalendereintrag + Mail; der Hub sieht den Termin über
                 denselben Kalender. Danach Lead manuell auf "Call vereinbart" setzen. */}
-            <a
-              href={calBookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-flex items-center gap-2 rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700"
-            >
-              📅 Termin via Cal.com buchen ↗
-            </a>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <a
+                href={calBookingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-purple-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-purple-700"
+              >
+                📅 Termin via Cal.com buchen ↗
+              </a>
+              {email ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  ✉️ {email} <span className="text-stone-400">· im Link vorausgefüllt</span>
+                </span>
+              ) : lead.webseite ? (
+                <button
+                  onClick={findEmail}
+                  disabled={findingEmail}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-purple-700 ring-1 ring-purple-200 hover:bg-purple-50 disabled:opacity-50"
+                  title="Crawlt die Website nach einer E-Mail und füllt sie in den Cal.com-Link"
+                >
+                  {findingEmail ? "🔎 Suche…" : "🔎 E-Mail finden"}
+                </button>
+              ) : (
+                <span className="text-xs text-stone-400">Keine Website → keine E-Mail-Suche möglich</span>
+              )}
+            </div>
+            {emailMsg && <p className="mt-1 text-xs text-amber-600">{emailMsg}</p>}
           </div>
         </div>
 

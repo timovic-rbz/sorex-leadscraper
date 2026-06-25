@@ -673,6 +673,12 @@ export async function dbGetLead(uid: string): Promise<DbLead | null> {
   return rows.length > 0 ? rowToDbLead(rows[0]) : null;
 }
 
+/** Setzt die E-Mail eines Leads (z.B. nach Per-Lead-Website-Crawl). */
+export async function dbSetLeadEmail(uid: string, email: string): Promise<void> {
+  await ensureSchema();
+  await sql`UPDATE leads SET email = ${email} WHERE uid = ${uid}`;
+}
+
 // =============================================================================
 // ENRICHMENT-CACHE – DataForSEO-Profil & Website-Check pro Lead (1× bezahlen)
 // =============================================================================
