@@ -18,6 +18,7 @@ import type {
   WebsiteCheck,
 } from "./types";
 import { LEAD_STATUS_ORDER } from "./types";
+import { notifySalesHub } from "./saleshub";
 
 // =============================================================================
 // Connection (Supabase Postgres)
@@ -640,14 +641,25 @@ export async function dbUpdateLead(
 
   // Status-Wechsel ins Event-Log – nur wenn sich der Status wirklich geändert hat,
   // damit der Leaderboard-Count nicht aufgebläht wird, wenn jemand nur Notizen speichert.
-  if (patch.leadStatus !== undefined && patch.leadStatus !== prior.leadStatus) {
+  const statusChanged =
+    patch.leadStatus !== undefined && patch.leadStatus !== prior.leadStatus;
+  if (statusChanged) {
     await sql`
       INSERT INTO lead_events (lead_uid, setter_id, from_status, to_status)
-      VALUES (${uid}, ${setterId}, ${prior.leadStatus}, ${patch.leadStatus})
+      VALUES (${uid}, ${setterId}, ${prior.leadStatus}, ${patch.leadStatus!})
     `;
   }
 
-  return await dbGetLead(uid);
+  const updated = await dbGetLead(uid);
+
+  // Sales-Hub-Webhook: bei Übergang in eine qualifizierte Stufe (interested /
+  // call_scheduled) den Lead pushen. notifySalesHub entscheidet selbst, ob der
+  // Ziel-Status relevant ist, und wirft nie – der Status ist oben schon committed.
+  if (statusChanged && updated) {
+    await notifySalesHub(updated, prior.leadStatus, updated.leadStatus);
+  }
+
+  return updated;
 }
 
 export async function dbGetLead(uid: string): Promise<DbLead | null> {
