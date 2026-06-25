@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { use } from "react";
+import { waLink } from "@/lib/whatsapp";
 import {
   LEAD_STATUS_META,
   LEAD_STATUS_ORDER,
@@ -757,6 +758,21 @@ function LeadModal({
     };
   }, [lead.uid]);
 
+  // Setter-Name für die WhatsApp-Nachricht ("Hier ist [Dein Name]").
+  const [senderName, setSenderName] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { setterName?: string | null } | null) => {
+        if (active) setSenderName(d?.setterName ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
     setErrorMsg(null);
@@ -852,6 +868,8 @@ function LeadModal({
       return base;
     }
   })();
+
+  const waUrl = waLink(lead, senderName);
 
   const currentMeta = LEAD_STATUS_META[lead.leadStatus ?? "new"];
   const today = getTodayHours(lead.oeffnungszeiten);
@@ -1078,6 +1096,17 @@ function LeadModal({
               >
                 📅 Termin via Cal.com buchen ↗
               </a>
+              {waUrl && (
+                <a
+                  href={waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700"
+                  title="WhatsApp öffnen mit vorausgefüllter Nachricht (Termin + Infos)"
+                >
+                  💬 WhatsApp-Infos senden ↗
+                </a>
+              )}
               {email ? (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                   ✉️ {email} <span className="text-stone-400">· im Link vorausgefüllt</span>
